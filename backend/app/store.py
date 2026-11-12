@@ -61,4 +61,50 @@ def set_chunk_count(repo_id: str, count: int) -> None:
         raise ValueError(f"Repository not found: {repo_id}")
     
     record.chunk_count = count
-        
+
+
+
+
+SessionStatus = Literal["running", "done", "failed"]
+
+
+class SessionRecord:
+    def __init__(self, repo_id: str, question: str):
+        self.id: str = str(uuid.uuid4())
+        self.repo_id: str = repo_id
+        self.question: str = question
+        self.status: SessionStatus = "running"
+        self.final_answer: str = ""
+        self.findings: list = []
+        self.error: Optional[str] = None
+        self.created_at: datetime = datetime.now(timezone.utc)
+
+
+_sessions: dict[str, SessionRecord] = {}
+
+
+def create_session(repo_id: str, question: str) -> SessionRecord:
+    record = SessionRecord(repo_id, question)
+    _sessions[record.id] = record
+    return record
+
+
+def get_session(session_id: str) -> Optional[SessionRecord]:
+    return _sessions.get(session_id)
+
+
+def finish_session(session_id: str, final_answer: str, findings: list) -> None:
+    record = _sessions.get(session_id)
+    if record is None:
+        raise ValueError(f"Session not found: {session_id}")
+    record.status = "done"
+    record.final_answer = final_answer
+    record.findings = findings
+
+
+def fail_session(session_id: str, error: str) -> None:
+    record = _sessions.get(session_id)
+    if record is None:
+        raise ValueError(f"Session not found: {session_id}")
+    record.status = "failed"
+    record.error = error
