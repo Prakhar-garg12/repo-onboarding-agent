@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Repo Onboarding Agent</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <h1>Repo Onboarding Agent</h1>
+
+  <section id="repo-section">
+    <h2>1. Load a repository</h2>
+    <input id="repo-url" type="text" placeholder="https://github.com/pallets/click">
+    <button id="load-btn">Load</button>
+    <p id="repo-status"></p>
+  </section>
+
+  <section id="ask-section">
+    <h2>2. Ask a question</h2>
+    <input id="question" type="text" placeholder="How does argument parsing work?" disabled>
+    <button id="ask-btn" disabled>Ask</button>
+    <p id="ask-status"></p>
+  </section>
+
+  <section id="result-section">
+    <h2>Answer</h2>
+    <pre id="answer"></pre>
+    <h2>What the agent read</h2>
+    <ul id="findings"></ul>
+  </section>
+
+  <script src="app.js"></script>
+</body>
+</html>
