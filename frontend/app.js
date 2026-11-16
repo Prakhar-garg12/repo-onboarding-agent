@@ -54,7 +54,6 @@ async function api(path, options) {
 
 function renderMarkdownInto(el, text) {
   if (window.marked && window.DOMPurify) {
-    // sanitize: the answer comes from a model, so never insert it as raw HTML
     el.innerHTML = DOMPurify.sanitize(marked.parse(text));
   } else {
     el.textContent = text;
