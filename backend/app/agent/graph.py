@@ -110,8 +110,9 @@ def explorer_node(state: AgentState) -> AgentState:
 
     elif tool_name == "search_code":
         result = search_code(repo_id, arg)
-        result_summary = "Matches:\n" + "\n".join(
-               f"  {r['file_path']}: {r['content'][:300]}" for r in result[:3]
+        matched = [r["file_path"].replace("\\", "/") for r in result[:3]]
+        result_summary = "Matched files: " + " | ".join(matched) + "\n\n" + "\n".join(
+            f"  {r['file_path']}: {r['content'][:300]}" for r in result[:3]
         )
 
     else:

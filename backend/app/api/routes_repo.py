@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks
@@ -6,7 +7,7 @@ from app.store import create_repo, get_repo, update_repo_status, set_chunk_count
 from app.api.schemas import CreateRepoRequest, CreateRepoResponse, RepoStatusResponse
 
 from app.ingestion.cloner import clone_repo, WORKSPACE_DIR
-from app.ingestion.parser import parse_repo
+from app.ingestion.parser import parse_repo, IGNORED_DIRS
 from app.ingestion.indexer import index_chunks
 
 
@@ -58,3 +59,33 @@ def get_repo_status(repo_id: str):
         error=record.error,
         chunk_count=record.chunk_count,
     )
+
+
+MAX_TREE_NODES = 600
+
+
+@router.get("/{repo_id}/tree")
+def get_repo_tree(repo_id: str):
+    record = get_repo(repo_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="repo not found")
+    root = WORKSPACE_DIR / repo_id
+    if not root.exists():
+        raise HTTPException(status_code=404, detail="repo files not found on disk")
+
+    entries = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in IGNORED_DIRS]
+        base = Path(dirpath).relative_to(root)
+        entries += [(base / d, "dir") for d in dirnames]
+        entries += [(base / f, "file") for f in filenames]
+
+    entries.sort(key=lambda e: (len(e[0].parts), e[0].as_posix().lower()))
+    truncated = len(entries) > MAX_TREE_NODES
+    entries = entries[:MAX_TREE_NODES]
+
+    name = record.repo_url.rstrip("/").split("/")[-1]
+    nodes = [{"id": ".", "name": name, "type": "dir", "parent": None}]
+    for rel, kind in entries:
+        nodes.append({"id": rel.as_posix(), "name": rel.name, "type": kind, "parent": rel.parent.as_posix()})
+    return {"nodes": nodes, "truncated": truncated}

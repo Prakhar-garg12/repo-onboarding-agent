@@ -1,273 +1,398 @@
 const API = "http://localhost:8000";
-
 const $ = (id) => document.getElementById(id);
-const repoUrlInput = $("repo-url");
-const loadBtn = $("load-btn");
-const repoStatus = $("repo-status");
-const questionInput = $("question");
-const askBtn = $("ask-btn");
-const askStatus = $("ask-status");
-const resultSection = $("result-section");
-const answeredQuestion = $("answered-question");
-const answerBox = $("answer");
-const findingsSection = $("findings-section");
-const findingsList = $("findings");
+const PARTIAL = / \(from character \d+\)$/;
+const normalize = (p) => (String(p || ".").trim().replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/, "") || ".");
+
+// tree
+const Graph = (() => {
+  const pane = $("graph-pane");
+  const svg = d3.select("#graph");
+  const vp = svg.append("g");                      
+  const linkG = vp.append("g"), trailG = vp.append("g"), nodeG = vp.append("g");
+  const zoom = d3.zoom().scaleExtent([0.2, 4]).on("zoom", (e) => vp.attr("transform", e.transform));
+  svg.call(zoom).on("dblclick.zoom", null);
+
+  const ROW = 22;    // vertical space between nodes
+  const COL = 200;   // horizontal space between levels
+
+  let byId = new Map();          // id -> node
+  let kids = new Map();          // folder id -> its children (sorted)
+  let open = new Set(["."]);     // folders that are currently expanded
+  let laid = new Map();          // id -> position computed by d3.tree
+  let nodeSel = null;
+  let trail = [], pos = ".", active = false;
+  const sets = { listed: new Set(), read: new Set(), match: new Set(), seen: new Set() };
+
+  // 1) receive the flat list from the backend and build lookups
+  function setTree(data) {
+    clear();
+    const nodes = data.nodes.map((n) => ({ ...n }));
+    byId = new Map(nodes.map((n) => [n.id, n]));
+    kids = new Map();
+    nodes.forEach((n) => {
+      if (n.parent === null) return;
+      if (!kids.has(n.parent)) kids.set(n.parent, []);
+      kids.get(n.parent).push(n);
+    });
+    // folders first, then files, each A-Z
+    kids.forEach((list) =>
+      list.sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === "dir" ? -1 : 1))
+    );
+    open = new Set(["."]);
+    render(true);
+  }
+
+  const radius = (n) => (n.id === "." ? 8 : n.type === "dir" ? 5 : 3);
+
+  // 2) draw only the folders that are open
+  function render(refit) {
+    if (!byId.has(".")) return;
+
+    const root = d3.hierarchy(byId.get("."), (d) => (open.has(d.id) ? kids.get(d.id) : null));
+    d3.tree().nodeSize([ROW, COL])(root);        // d3 sets .x (vertical) and .y (horizontal)
+    const list = root.descendants();
+    laid = new Map(list.map((d) => [d.data.id, d]));
+
+    linkG.selectAll("path")
+      .data(root.links(), (d) => d.target.data.id)
+      .join("path")
+      .attr("class", "link")
+      .attr("fill", "none")
+      .attr("d", d3.linkHorizontal().x((d) => d.y).y((d) => d.x));
+
+    nodeSel = nodeG.selectAll("g.node")
+      .data(list, (d) => d.data.id)
+      .join((enter) => {
+        const g = enter.append("g")
+          .attr("class", (d) => "node " + d.data.type)
+          .on("click", (e, d) => toggle(d.data.id));
+        g.append("circle").attr("class", "halo").attr("r", (d) => radius(d.data) + 3);
+        g.append("circle").attr("class", "body").attr("r", (d) => radius(d.data));
+        g.append("text").attr("x", (d) => radius(d.data) + 6).attr("y", 3);
+        g.append("title").text((d) => d.data.id);
+        return g;
+      })
+      .classed("show", true)                      // always show labels in a tree
+      .style("cursor", (d) => (kids.has(d.data.id) ? "pointer" : "default"))
+      .attr("transform", (d) => `translate(${d.y},${d.x})`);
+
+    // a closed folder gets a "+" so you know you can click it
+    nodeSel.select("text").text((d) => {
+      const n = d.data;
+      const closed = n.type === "dir" && kids.has(n.id) && !open.has(n.id);
+      return n.name + (closed ? "  +" : "");
+    });
+
+    paint();
+    if (refit) fit(list);
+  }
+
+  // 3) colours + the dashed trail of the agent's path
+  function paint() {
+    if (!nodeSel) return;
+    nodeSel
+      .classed("seen", (d) => sets.seen.has(d.data.id))
+      .classed("listed", (d) => sets.listed.has(d.data.id))
+      .classed("match", (d) => sets.match.has(d.data.id))
+      .classed("read", (d) => sets.read.has(d.data.id))
+      .classed("visited", (d) => sets.listed.has(d.data.id) || sets.read.has(d.data.id) || sets.match.has(d.data.id))
+      .classed("current", (d) => active && d.data.id === pos);
+
+    trailG.selectAll("path")
+      .data(trail)
+      .join("path")
+      .attr("class", "trail")
+      .attr("d", (t) => {
+        const a = laid.get(t.from), b = laid.get(t.to);
+        if (!a || !b) return null;                
+        const mid = (a.y + b.y) / 2;
+        return `M${a.y},${a.x}C${mid},${a.x} ${mid},${b.x} ${b.y},${b.x}`;
+      });
+  }
+
+  function fit(list) {
+    const w = pane.clientWidth, h = pane.clientHeight;
+    const [x0, x1] = d3.extent(list, (n) => n.x), [y0, y1] = d3.extent(list, (n) => n.y);
+    const k = Math.min(1.2, 0.9 * Math.min(w / (y1 - y0 + COL), h / (x1 - x0 + 60)));
+    svg.transition().duration(500).call(
+      zoom.transform,
+      d3.zoomIdentity.translate(50 - k * y0, h / 2 - (k * (x0 + x1)) / 2).scale(k)
+    );
+  }
+
+  // click a folder to open / close it
+  function toggle(id) {
+    if (!kids.has(id)) return;
+    open.has(id) ? open.delete(id) : open.add(id);
+    render(false);
+  }
+
+  // open every folder above a node so the node is visible
+  function reveal(id) {
+    let p = byId.get(id) && byId.get(id).parent;
+    while (p !== null && p !== undefined) {
+      open.add(p);
+      p = byId.get(p).parent;
+    }
+  }
+
+  // called for every step the agent takes
+  function apply(f) {
+    const path = normalize(f.target.replace(PARTIAL, ""));
+    let hits = [];
+    if (f.action === "list_dir" && byId.has(path)) {
+      sets.listed.add(path);
+      (kids.get(path) || []).forEach((n) => sets.seen.add(n.id));
+      open.add(path);
+      hits = [path];
+    } else if (f.action === "read_file" && byId.has(path)) {
+      sets.read.add(path);
+      hits = [path];
+    } else if (f.action === "search_code") {
+      const m = /^Matched files: (.*)$/m.exec(f.result_summary);
+      hits = m ? m[1].split(" | ").map(normalize).filter((id) => byId.has(id)) : [];
+      hits.forEach((id) => sets.match.add(id));
+    }
+    hits.forEach(reveal);
+    if (hits.length) {
+      if (pos !== hits[0]) trail.push({ from: pos, to: hits[0] });
+      pos = hits[0];
+    }
+    render(true);
+  }
+
+  function reset(on = false) {            // forget the exploration, keep the map
+    Object.values(sets).forEach((s) => s.clear());
+    trail = []; pos = "."; active = on;
+    open = new Set(["."]);
+    render(true);
+  }
+
+  function clear() {
+    byId = new Map(); kids = new Map(); nodeSel = null; laid = new Map();
+    reset();
+    [linkG, trailG, nodeG].forEach((g) => g.selectAll("*").remove());
+  }
+
+  return { setTree, apply, reset, clear, setActive: (on) => { active = on; paint(); } };
+})();
+
+// ---------------------------------------------------------------- page
+const repoUrlInput = $("repo-url"), loadBtn = $("load-btn"), repoStatus = $("repo-status");
+const questionInput = $("question"), askBtn = $("ask-btn"), askStatus = $("ask-status");
+const outputCard = $("output-card"), findingsList = $("findings"), answerBox = $("answer");
+const tabActivity = $("tab-activity"), tabAnswer = $("tab-answer");
+const expandBtn = $("expand-btn"), stepCount = $("step-count");
+const tabBody = document.querySelector(".tab-body"), workspace = $("workspace");
+const graphEmpty = $("graph-empty"), pill = $("pill");
 
 let repoId = localStorage.getItem("repoId");
 let sessionId = localStorage.getItem("sessionId");
-let repoReady = false;
-let isAsking = false;
-let timer = null;
-let startedAt = 0;
+let repoReady = false, asking = false, shown = 0, timer = null;
+let answerReady = false, justLoaded = false;
+let repoGen = 0, askGen = 0, treeFor = null, treeReady = Promise.resolve();
 
-// ---------- helpers ----------
-
-function setStatus(el, text, kind = "") {
-  el.textContent = text;
-  el.className = "status " + kind;
-}
-
-// The question box and Ask button are enabled only when a repo is ready
-// and no question is currently being answered.
-function refreshAskControls() {
-  const enabled = repoReady && !isAsking;
-  questionInput.disabled = !enabled;
-  askBtn.disabled = !enabled;
-}
+const post = (body) => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+const setStatus = (el, text, kind = "") => { el.textContent = text; el.className = "status " + kind; };
+const refresh = () => { const on = repoReady && !asking; questionInput.disabled = askBtn.disabled = !on; };
 
 async function api(path, options) {
   let res;
-  try {
-    res = await fetch(`${API}${path}`, options);
-  } catch (e) {
-    throw new Error(`Cannot reach the backend at ${API}. Is it running?`);
-  }
+  try { res = await fetch(API + path, options); }
+  catch { throw new Error("Cannot reach the backend. Is it running?"); }
   if (!res.ok) {
-    let detail = "";
-    try { detail = (await res.json()).detail; } catch (_) {}
-    const err = new Error(detail || `Server returned ${res.status}`);
+    const err = new Error((await res.json().catch(() => ({}))).detail || "Server returned " + res.status);
     err.status = res.status;
     throw err;
   }
   return res.json();
 }
 
-function renderMarkdownInto(el, text) {
-  if (window.marked && window.DOMPurify) {
-    el.innerHTML = DOMPurify.sanitize(marked.parse(text));
-  } else {
-    el.textContent = text;
-    el.style.whiteSpace = "pre-wrap";
+function ensureTree() {
+  if (repoId && treeFor !== repoId) {
+    const id = (treeFor = repoId);
+    treeReady = api(`/repos/${id}/tree`)
+      .then((d) => { Graph.setTree(d); graphEmpty.hidden = true; })
+      .catch(() => { treeFor = null; });
   }
+  return treeReady;
 }
 
 function startTimer() {
   stopTimer();
-  startedAt = Date.now();
-  timer = setInterval(() => {
-    const secs = Math.round((Date.now() - startedAt) / 1000);
-    setStatus(askStatus, `The agent is exploring the repository... ${secs}s`);
-  }, 1000);
+  const t0 = Date.now();
+  const tick = () => setStatus(askStatus, `The agent is exploring… ${Math.round((Date.now() - t0) / 1000)}s`);
+  tick();
+  timer = setInterval(tick, 1000);
+}
+function stopTimer() { clearInterval(timer); timer = null; }
+
+// ---- tabs
+function closeFull() {
+  outputCard.classList.remove("full");
+  expandBtn.textContent = "Expand ⤢";
 }
 
-function stopTimer() {
-  if (timer) {
-    clearInterval(timer);
-    timer = null;
-  }
+function showTab(name) {
+  const answer = name === "answer";
+  if (!answer) closeFull();
+  findingsList.hidden = answer;
+  answerBox.hidden = !answer;
+  tabActivity.classList.toggle("active", !answer);
+  tabAnswer.classList.toggle("active", answer);
+  expandBtn.hidden = !(answer && answerReady);
+  tabBody.scrollTop = 0;
 }
 
-// ---------- loading a repository ----------
+function clearRun() {
+  shown = 0; answerReady = false;
+  findingsList.innerHTML = ""; answerBox.innerHTML = ""; stepCount.textContent = "";
+  pill.hidden = true;
+  Graph.reset();
+}
 
+// ---- repository
 async function loadRepo() {
-  const repoUrl = repoUrlInput.value.trim();
-  if (!repoUrl) {
-    setStatus(repoStatus, "Please enter a repository URL.", "error");
-    return;
-  }
+  const url = repoUrlInput.value.trim();
+  if (!url) return setStatus(repoStatus, "Please enter a repository URL.", "error");
 
-  loadBtn.disabled = true;
-  repoReady = false;
-  refreshAskControls();
-  setStatus(repoStatus, "Submitting...");
-
+  loadBtn.disabled = true; repoReady = false; asking = false; askGen++; stopTimer(); refresh();
+  clearRun(); outputCard.hidden = true; closeFull();
+  sessionId = null; localStorage.removeItem("sessionId");
+  Graph.clear(); treeFor = null; graphEmpty.hidden = false;
+  setStatus(repoStatus, "Submitting…"); setStatus(askStatus, "");
   try {
-    const data = await api("/repos", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ repo_url: repoUrl }),
-    });
-    repoId = data.repo_id;
+    const d = await api("/repos", post({ repo_url: url }));
+    repoId = d.repo_id;
+    justLoaded = true;
     localStorage.setItem("repoId", repoId);
-    localStorage.setItem("repoUrl", repoUrl);
-    pollRepo();
-  } catch (err) {
-    setStatus(repoStatus, err.message, "error");
+    localStorage.setItem("repoUrl", url);
+    pollRepo(++repoGen);
+  } catch (e) {
     loadBtn.disabled = false;
+    setStatus(repoStatus, e.message, "error");
   }
 }
 
-async function pollRepo() {
+async function pollRepo(my) {
   try {
-    const data = await api(`/repos/${repoId}/status`);
-
-    if (data.status === "ready") {
-      repoReady = true;
-      setStatus(repoStatus, `Ready: ${data.chunk_count} chunks indexed`, "ok");
+    const d = await api(`/repos/${repoId}/status`);
+    if (my !== repoGen) return;
+    if (d.status === "ready") {
+      repoReady = true; loadBtn.disabled = false; refresh();
+      setStatus(repoStatus, `Ready · ${d.chunk_count} chunks indexed`, "ok");
+      ensureTree();
+      if (justLoaded) {                      // bring the workspace into view after a fresh load
+        justLoaded = false;
+        workspace.scrollIntoView({ behavior: "smooth" });
+      }
+    } else if (d.status === "failed") {
       loadBtn.disabled = false;
-      refreshAskControls();
-      return;
-    }
-
-    if (data.status === "failed") {
-      setStatus(repoStatus, `Failed: ${data.error}`, "error");
-      loadBtn.disabled = false;
-      return;
-    }
-
-    setStatus(repoStatus, `Working... (${data.status})`);
-    setTimeout(pollRepo, 2000);
-  } catch (err) {
-    if (err.status === 404) {
-      repoId = null;
-      localStorage.removeItem("repoId");
-      setStatus(
-        repoStatus,
-        "The backend no longer knows this repository (it was probably restarted). Please load it again.",
-        "error"
-      );
+      setStatus(repoStatus, "Failed: " + d.error, "error");
     } else {
-      setStatus(repoStatus, err.message, "error");
+      setStatus(repoStatus, "Working… " + d.status);
+      setTimeout(() => pollRepo(my), 1500);
     }
+  } catch (e) {
+    if (my !== repoGen) return;
     loadBtn.disabled = false;
+    if (e.status === 404) { repoId = null; localStorage.removeItem("repoId"); }
+    setStatus(repoStatus, e.status === 404 ? "The backend no longer has this repository. Click Load to add it again." : e.message, "error");
   }
 }
 
-// ---------- asking a question ----------
-
+// ---- questions
 async function askQuestion() {
-  const question = questionInput.value.trim();
-  if (!repoId || !repoReady) {
-    setStatus(askStatus, "Load a repository first.", "error");
-    return;
-  }
-  if (!question) {
-    setStatus(askStatus, "Please type a question.", "error");
-    return;
-  }
+  const q = questionInput.value.trim();
+  if (!repoReady || !q) return setStatus(askStatus, repoReady ? "Please type a question." : "Load a repository first.", "error");
 
-  isAsking = true;
-  refreshAskControls();
-  resultSection.hidden = true;
-  findingsSection.hidden = true;
-  setStatus(askStatus, "Sending question...");
-
+  asking = true; refresh(); clearRun();
+  outputCard.hidden = false; tabAnswer.disabled = true; showTab("activity");
+  setStatus(askStatus, "Sending question…");
   try {
-    const data = await api("/ask", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ repo_id: repoId, question: question }),
-    });
-    sessionId = data.session_id;
+    const d = await api("/ask", post({ repo_id: repoId, question: q }));
+    sessionId = d.session_id;
     localStorage.setItem("sessionId", sessionId);
-    startTimer();
-    pollAnswer();
-  } catch (err) {
-    setStatus(askStatus, err.message, "error");
-    isAsking = false;
-    refreshAskControls();
+    pollAnswer(++askGen);
+  } catch (e) {
+    asking = false; refresh();
+    setStatus(askStatus, e.message, "error");
   }
 }
 
-async function pollAnswer() {
+async function pollAnswer(my) {
   try {
-    const data = await api(`/ask/${sessionId}`);
+    const d = await api(`/ask/${sessionId}`);
+    if (my !== askGen) return;
+    await ensureTree();
+    outputCard.hidden = false;
+    d.findings.slice(shown).forEach(addStep);
+    shown = d.findings.length;
+    stepCount.textContent = shown || "";
 
-    if (data.status === "done") {
-      stopTimer();
-      setStatus(askStatus, "Done.", "ok");
-      showResult(data);
-      isAsking = false;
-      refreshAskControls();
-      return;
+    const running = d.status === "running";
+    Graph.setActive(running);
+    pill.hidden = !running;
+    pill.textContent = `Exploring · ${shown} step${shown === 1 ? "" : "s"}`;
+    if (running) {
+      if (!timer) startTimer();
+      return setTimeout(() => pollAnswer(my), 1200);
     }
-
-    if (data.status === "failed") {
-      stopTimer();
-      setStatus(askStatus, `The agent failed: ${data.error}`, "error");
-      isAsking = false;
-      refreshAskControls();
-      return;
-    }
-
-    if (!timer) startTimer();
-    setTimeout(pollAnswer, 3000);
-  } catch (err) {
-    stopTimer();
-    if (err.status === 404) {
-      sessionId = null;
-      localStorage.removeItem("sessionId");
-      setStatus(askStatus, "That question's session is gone (the backend was restarted). Please ask again.", "error");
-    } else {
-      setStatus(askStatus, err.message, "error");
-    }
-    isAsking = false;
-    refreshAskControls();
+    finish(d);
+  } catch (e) {
+    if (my !== askGen) return;
+    stopTimer(); asking = false; refresh(); pill.hidden = true; Graph.setActive(false);
+    if (e.status === 404) { sessionId = null; localStorage.removeItem("sessionId"); }
+    setStatus(askStatus, e.status === 404 ? "That session is gone (the backend restarted). Please ask again." : e.message, "error");
   }
 }
 
-// ---------- showing the result ----------
-
-function showResult(data) {
-  answeredQuestion.textContent = data.question;
-  renderMarkdownInto(answerBox, data.final_answer || "(The agent returned no answer.)");
-  resultSection.hidden = false;
-
-  findingsList.innerHTML = "";
-  data.findings.forEach((f) => {
-    const li = document.createElement("li");
-    const details = document.createElement("details");
-    const summary = document.createElement("summary");
-
-    const badge = document.createElement("span");
-    badge.className = "badge " + f.action;
-    badge.textContent = f.action;
-
-    const target = document.createElement("code");
-    target.textContent = f.target;
-
-    summary.append(badge, " ", target);
-
-    const pre = document.createElement("pre");
-    pre.textContent = f.result_summary;
-
-    details.append(summary, pre);
-    li.appendChild(details);
-    findingsList.appendChild(li);
-  });
-  findingsSection.hidden = data.findings.length === 0;
+function finish(d) {
+  stopTimer(); asking = false; refresh();
+  if (d.status === "failed") return setStatus(askStatus, "The agent failed: " + d.error, "error");
+  setStatus(askStatus, "Done.", "ok");
+  const text = d.final_answer || "(The agent returned no answer.)";
+  if (window.marked && window.DOMPurify) answerBox.innerHTML = DOMPurify.sanitize(marked.parse(text));
+  else answerBox.textContent = text;
+  answerReady = true;
+  tabAnswer.disabled = false;
+  showTab("answer");                        // switch to the answer automatically
 }
 
-// ---------- wiring ----------
+function addStep(f) {
+  Graph.apply(f);
+  const li = document.createElement("li");
+  li.innerHTML = "<details><summary><span class='badge'></span><code></code></summary><pre></pre></details>";
+  const badge = li.querySelector(".badge");
+  badge.textContent = f.action;
+  badge.classList.add(f.action);
+  li.querySelector("code").textContent = f.target;
+  li.querySelector("pre").textContent = f.result_summary;
+  findingsList.appendChild(li);
+  if (!findingsList.hidden) tabBody.scrollTop = tabBody.scrollHeight;   // follow the newest step
+}
 
+// ---- wiring
 loadBtn.addEventListener("click", loadRepo);
 askBtn.addEventListener("click", askQuestion);
 repoUrlInput.addEventListener("keydown", (e) => { if (e.key === "Enter") loadRepo(); });
 questionInput.addEventListener("keydown", (e) => { if (e.key === "Enter") askQuestion(); });
+tabActivity.addEventListener("click", () => showTab("activity"));
+tabAnswer.addEventListener("click", () => showTab("answer"));
+expandBtn.addEventListener("click", () => {
+  expandBtn.textContent = outputCard.classList.toggle("full") ? "Close ✕" : "Expand ⤢";
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeFull(); });
 
-// on page load: resume whatever was in progress before the refresh
 repoUrlInput.value = localStorage.getItem("repoUrl") || "";
-refreshAskControls();
-
+refresh();
 if (repoId) {
   loadBtn.disabled = true;
-  setStatus(repoStatus, "Checking saved repository...");
-  pollRepo();
+  setStatus(repoStatus, "Checking saved repository…");
+  pollRepo(++repoGen);
 }
-
 if (sessionId) {
-  isAsking = true;
-  refreshAskControls();
-  setStatus(askStatus, "Checking saved question...");
-  pollAnswer();
+  asking = true; refresh();
+  setStatus(askStatus, "Checking saved question…");
+  pollAnswer(++askGen);
 }

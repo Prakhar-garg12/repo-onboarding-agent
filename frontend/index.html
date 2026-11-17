@@ -4,44 +4,75 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Repo Onboarding Agent</title>
+  <link rel="icon" href="data:,">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <main>
-    <h1>Repo Onboarding Agent</h1>
-    <p class="subtitle">Load a GitHub repository, then ask how it works. The agent explores the code and shows you everything it read.</p>
 
-    <section class="card">
-      <h2>1. Load a repository</h2>
-      <div class="row">
-        <input id="repo-url" type="text" placeholder="https://github.com/pallets/click">
-        <button id="load-btn">Load</button>
+  <!-- top navigation bar -->
+  <header class="nav">
+    <a class="brand" href="#">RepoOnboard</a>
+    <nav>
+      <a href="#workspace">Agent</a>
+      <a class="btn solid" href="#repo-url">Try it</a>
+    </nav>
+  </header>
+
+  <!-- hero: headline + repository input -->
+  <section class="hero">
+    <h1>Understand any<br>codebase in <em>minutes</em></h1>
+    <p class="sub">Paste a GitHub repository, ask a question, and watch the agent explore folders, read files and search code to find the answer.</p>
+
+    <div class="repo-form">
+      <input id="repo-url" type="text" placeholder="https://github.com/owner/repo" spellcheck="false">
+      <button id="load-btn" class="primary">Load</button>
+    </div>
+    <p id="repo-status" class="status"></p>
+  </section>
+
+  <!-- workspace: questions on the left, repo tree on the right -->
+  <div class="workspace" id="workspace">
+    <aside id="panel">
+      <section class="card">
+        <h2>Ask the agent</h2>
+        <div class="row">
+          <input id="question" type="text" placeholder="How does this project work?" disabled>
+          <button id="ask-btn" class="primary" disabled>Ask</button>
+        </div>
+        <p id="ask-status" class="status"></p>
+      </section>
+
+      <section class="card tabs-card" id="output-card" hidden>
+        <div class="tabs">
+          <button class="tab active" id="tab-activity">Activity <span id="step-count" class="count"></span></button>
+          <button class="tab" id="tab-answer" disabled>Answer</button>
+          <button id="expand-btn" class="icon-btn" hidden>Expand ⤢</button>
+        </div>
+        <div class="tab-body">
+          <ol id="findings"></ol>
+          <div id="answer" class="markdown" hidden></div>
+        </div>
+      </section>
+    </aside>
+
+    <main id="graph-pane">
+      <svg id="graph"></svg>
+      <div id="legend">
+        <span><i style="background:#141414;border-color:#555"></i>folder</span>
+        <span><i style="background:#0b0b0b;border-color:#333"></i>file</span>
+        <span><i style="background:#1a3358;border-color:#5aa9ff"></i>listed</span>
+        <span><i style="background:#0d4a33;border-color:#2fe38f"></i>read</span>
+        <span><i style="background:#33235a;border-color:#b18cff"></i>search hit</span>
       </div>
-      <p id="repo-status" class="status"></p>
-    </section>
+      <div id="pill" hidden></div>
+      <p id="graph-empty">The repository tree appears here once a repo is loaded.</p>
+    </main>
+  </div>
 
-    <section class="card">
-      <h2>2. Ask a question</h2>
-      <div class="row">
-        <input id="question" type="text" placeholder="How does argument parsing work?" disabled>
-        <button id="ask-btn" disabled>Ask</button>
-      </div>
-      <p id="ask-status" class="status"></p>
-    </section>
-
-    <section class="card" id="result-section" hidden>
-      <h2>Answer</h2>
-      <p id="answered-question" class="question"></p>
-      <div id="answer" class="markdown"></div>
-    </section>
-
-    <section class="card" id="findings-section" hidden>
-      <h2>What the agent read</h2>
-      <p class="hint">Click a step to see the exact text the agent saw. Use this to check the answer.</p>
-      <ol id="findings"></ol>
-    </section>
-  </main>
-
+  <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
   <script src="app.js"></script>

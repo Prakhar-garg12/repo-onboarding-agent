@@ -9,10 +9,11 @@ from app.store import (
 )
 from app.api.schemas import AskRequest, AskResponse, SessionResponse
 from app.agent.graph import build_graph
+from app.store import update_session_findings
 
 router = APIRouter(prefix="/ask", tags=["ask"])
 
-# built once when the app starts, reused for every question
+
 _graph = build_graph()
 
 
@@ -27,7 +28,10 @@ def run_agent_task(session_id: str, repo_id: str, question: str):
             "confident_enough": False,
             "final_answer": "",
         }
-        final_state = _graph.invoke(initial_state, config={"recursion_limit": 50})
+        final_state = initial_state
+        for state in _graph.stream(initial_state, config={"recursion_limit": 50}, stream_mode="values"):
+            final_state = state
+            update_session_findings(session_id, state["findings"])
         finish_session(session_id, final_state["final_answer"], final_state["findings"])
     except Exception as e:
         fail_session(session_id, str(e))
@@ -61,3 +65,4 @@ def get_answer(session_id: str):
         findings=session.findings,
         error=session.error,
     )
+

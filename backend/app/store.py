@@ -108,3 +108,8 @@ def fail_session(session_id: str, error: str) -> None:
         raise ValueError(f"Session not found: {session_id}")
     record.status = "failed"
     record.error = error
+
+def update_session_findings(session_id: str, findings: list) -> None:
+    record = _sessions.get(session_id)
+    if record is not None:
+        record.findings = list(findings)
