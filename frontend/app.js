@@ -9,17 +9,21 @@ const Graph = (() => {
   const svg = d3.select("#graph");
   const vp = svg.append("g");                      // everything inside here pans/zooms
   const linkG = vp.append("g"), trailG = vp.append("g"), nodeG = vp.append("g");
-  const zoom = d3.zoom().scaleExtent([0.2, 4]).on("zoom", (e) => vp.attr("transform", e.transform));
+  const zoom = d3.zoom().scaleExtent([0.05, 4]).on("zoom", (e) => {
+    vp.attr("transform", e.transform);
+    svg.classed("far", e.transform.k < 0.45).style("--k", e.transform.k);   // far = hide small labels
+  });
   svg.call(zoom).on("dblclick.zoom", null);
 
-  const ROW = 20;    // vertical space between nodes
-  const COL = 130;   // horizontal space between levels (small, because the panel is narrow)
+  const ROW = 18;    // vertical space between nodes
+  const COL = 130;   // horizontal space between levels
 
   let byId = new Map(), kids = new Map(), laid = new Map();
   let open = new Set(["."]);
-  let nodeSel = null, trail = [], pos = ".", active = false;
+  let nodeSel = null, trail = [], pos = ".", active = false, intro = false;
   const sets = { listed: new Set(), read: new Set(), match: new Set(), seen: new Set() };
 
+  // receive the flat list from the backend and draw the FULL tree (every folder open)
   function setTree(data) {
     clear();
     const nodes = data.nodes.map((n) => ({ ...n }));
@@ -33,11 +37,19 @@ const Graph = (() => {
     kids.forEach((list) =>
       list.sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === "dir" ? -1 : 1))
     );
-    open = new Set(["."]);
+    open = new Set(kids.keys());
+    intro = true;                                  // the first draw grows level by level
     render(true);
   }
 
   const radius = (n) => (n.id === "." ? 8 : n.type === "dir" ? 5 : 3);
+
+  function fadeIn(sel, depthOf) {
+    sel.style("opacity", 0)
+      .transition().delay((d) => depthOf(d) * 140).duration(450)
+      .style("opacity", 1)
+      .on("end", function () { d3.select(this).style("opacity", null); });
+  }
 
   function render(refit) {
     if (!byId.has(".")) return;
@@ -46,7 +58,7 @@ const Graph = (() => {
     const list = root.descendants();
     laid = new Map(list.map((d) => [d.data.id, d]));
 
-    linkG.selectAll("path")
+    const links = linkG.selectAll("path")
       .data(root.links(), (d) => d.target.data.id)
       .join("path")
       .attr("class", "link")
@@ -66,6 +78,7 @@ const Graph = (() => {
         return g;
       })
       .classed("show", true)
+      .classed("top", (d) => d.depth <= 1 && d.data.type === "dir")
       .style("cursor", (d) => (kids.has(d.data.id) ? "pointer" : "default"))
       .attr("transform", (d) => `translate(${d.y},${d.x})`);
 
@@ -75,12 +88,18 @@ const Graph = (() => {
       return n.name + (closed ? "  +" : "");
     });
 
+    if (intro) {
+      fadeIn(links, (d) => d.target.depth);
+      fadeIn(nodeSel, (d) => d.depth);
+      intro = false;
+    }
     paint();
     if (refit) fit(list);
   }
 
   function paint() {
     if (!nodeSel) return;
+    svg.classed("exploring", active);
     nodeSel
       .classed("seen", (d) => sets.seen.has(d.data.id))
       .classed("listed", (d) => sets.listed.has(d.data.id))
@@ -101,24 +120,24 @@ const Graph = (() => {
       });
   }
 
-  // show the whole tree
+  // overview: the whole tree centred in the pane
   function fit(list) {
     if (!list || !list.length) return;
     const w = pane.clientWidth, h = pane.clientHeight;
     if (!w || !h) return;
     const [x0, x1] = d3.extent(list, (n) => n.x), [y0, y1] = d3.extent(list, (n) => n.y);
-    const k = Math.max(0.4, Math.min(1.2, 0.9 * Math.min(w / (y1 - y0 + COL), h / (x1 - x0 + 60))));
-    svg.transition().duration(500).call(
+    const k = Math.max(0.05, Math.min(1.2, 0.92 * Math.min(w / (y1 - y0 + COL), h / (x1 - x0 + 40))));
+    svg.transition().duration(600).call(
       zoom.transform,
-      d3.zoomIdentity.translate(24 - k * y0, h / 2 - (k * (x0 + x1)) / 2).scale(k)
+      d3.zoomIdentity.translate(w / 2 - (k * (y0 + y1)) / 2, h / 2 - (k * (x0 + x1)) / 2).scale(k)
     );
   }
 
-  // keep the agent's current node in view
+  // close-up on one node
   function follow(id) {
     const n = laid.get(id);
     if (!n) return;
-    const w = pane.clientWidth, h = pane.clientHeight, k = 0.9;
+    const w = pane.clientWidth, h = pane.clientHeight, k = 0.95;
     if (!w || !h) return;
     svg.transition().duration(500).call(
       zoom.transform,
@@ -126,17 +145,18 @@ const Graph = (() => {
     );
   }
 
-  // small tree: show everything. big tree: follow the agent.
+  // small tree: show all of it. big tree: follow the agent.
   function camera() {
     const list = Array.from(laid.values());
     if (!list.length) return;
     const w = pane.clientWidth, h = pane.clientHeight;
+    if (!w || !h) return;
     const [x0, x1] = d3.extent(list, (n) => n.x), [y0, y1] = d3.extent(list, (n) => n.y);
-    if ((y1 - y0 + COL) * 0.9 <= w && (x1 - x0 + 60) * 0.9 <= h) fit(list);
+    if ((y1 - y0 + COL) * 0.9 <= w && (x1 - x0 + 40) * 0.9 <= h) fit(list);
     else follow(pos);
   }
 
-  function refit() { fit(Array.from(laid.values())); }
+  const refit = () => fit(Array.from(laid.values()));
 
   function toggle(id) {
     if (!kids.has(id)) return;
@@ -152,6 +172,26 @@ const Graph = (() => {
     }
   }
 
+  function expandAll() { open = new Set(kids.keys()); render(false); }
+
+  // close everything except the paths the agent has explored
+  function collapse() {
+    open = new Set(["."]);
+    sets.listed.forEach((id) => open.add(id));
+    [...sets.listed, ...sets.read, ...sets.match].forEach(reveal);
+    render(false);
+  }
+
+  // jump to a file (used when you hover a step or click a file in the list)
+  function focus(raw) {
+    const id = normalize(String(raw).replace(PARTIAL, ""));
+    if (!byId.has(id)) return;
+    reveal(id);
+    render(false);
+    follow(id);
+  }
+
+  // called for every step the agent takes
   function apply(f) {
     const path = normalize(f.target.replace(PARTIAL, ""));
     let hits = [];
@@ -177,20 +217,24 @@ const Graph = (() => {
     if (hits.length) camera();
   }
 
-  function reset(on = false) {            // forget the exploration, keep the tree
+  function reset(on = false) {            // forget the exploration, keep the tree as it is
     Object.values(sets).forEach((s) => s.clear());
     trail = []; pos = "."; active = on;
-    open = new Set(["."]);
-    render(true);
+    render(false);
   }
 
   function clear() {
     byId = new Map(); kids = new Map(); nodeSel = null; laid = new Map();
-    reset();
+    open = new Set(["."]);
+    Object.values(sets).forEach((s) => s.clear());
+    trail = []; pos = "."; active = false;
     [linkG, trailG, nodeG].forEach((g) => g.selectAll("*").remove());
   }
 
-  return { setTree, apply, reset, clear, refit, setActive: (on) => { active = on; paint(); } };
+  return {
+    setTree, apply, reset, clear, refit, camera, focus, expandAll, collapse,
+    setActive: (on) => { active = on; paint(); },
+  };
 })();
 
 // ---------------------------------------------------------------- page
@@ -198,12 +242,13 @@ const landing = $("landing"), workspace = $("workspace");
 const repoUrlInput = $("repo-url"), loadBtn = $("load-btn"), repoStatus = $("repo-status");
 const stepper = $("stepper"), stepEls = [...stepper.children], backBtn = $("back-btn");
 const repoChip = $("repo-chip"), repoName = $("repo-name");
-const changeBtn = $("change-btn"), mapBtn = $("map-btn"), fitBtn = $("fit-btn");
+const changeBtn = $("change-btn"), mapBtn = $("map-btn"), fitBtn = $("fit-btn"), expandBtn = $("expand-btn");
 const thread = $("thread"), inner = $("thread-inner");
 const welcome = $("welcome"), welcomeRepo = $("welcome-repo");
 const question = $("question"), askBtn = $("ask-btn"), hint = $("ask-status");
-const graphEmpty = $("graph-empty"), pill = $("pill");
+const graphEmpty = $("graph-empty"), pill = $("pill"), mapMeta = $("map-meta");
 const srcList = $("src-list"), srcEmpty = $("src-empty");
+const cta = $("cta"), ctaInput = $("cta-input"), ctaGo = $("cta-go"), ctaStats = $("cta-stats");
 
 const DEFAULT_HINT = "The agent can make mistakes. Open the steps to check what it actually read.";
 
@@ -211,7 +256,7 @@ let repoId = localStorage.getItem("repoId");
 let sessionId = localStorage.getItem("sessionId");
 let repoReady = false, asking = false, shown = 0, timer = null, t0 = 0;
 let repoGen = 0, askGen = 0, treeFor = null, treeReady = Promise.resolve();
-let cur = null, stick = true;
+let cur = null, stick = true, expanded = true, lastDesc = "";
 const sources = new Set();
 
 const post = (body) => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -240,31 +285,63 @@ function ensureTree() {
   if (repoId && treeFor !== repoId && !workspace.hidden) {
     const id = (treeFor = repoId);
     treeReady = api(`/repos/${id}/tree`)
-      .then((d) => { Graph.setTree(d); graphEmpty.hidden = true; })
+      .then((d) => {
+        Graph.setTree(d);
+        graphEmpty.hidden = true;
+        expanded = true; expandBtn.textContent = "Collapse";
+        const dirs = d.nodes.filter((n) => n.type === "dir").length - 1;
+        const files = d.nodes.filter((n) => n.type === "file").length;
+        const stats = `${files} files · ${dirs} folders${d.truncated ? " (partial)" : ""}`;
+        mapMeta.textContent = stats;
+        ctaStats.textContent = "· " + stats;
+      })
       .catch(() => { treeFor = null; });
   }
   return treeReady;
 }
 
-// ---- screens
+// ---- stages: "tree" = full-screen map, "chat" = map on the left + chat on the right
+const stage = () => (workspace.classList.contains("stage-chat") ? "chat" : "tree");
+const reframe = () => (stage() === "tree" ? Graph.refit() : Graph.camera());
+
+function setStage(s) {
+  workspace.classList.toggle("stage-tree", s === "tree");
+  workspace.classList.toggle("stage-chat", s === "chat");
+  mapBtn.hidden = workspace.hidden || s === "tree";
+}
+
 function repoLabel() {
   const u = (repoUrlInput.value || localStorage.getItem("repoUrl") || "")
     .trim().replace(/\/+$/, "").replace(/\.git$/, "");
   return u.split("/").slice(-2).join("/") || "this repository";
 }
 
-function enterChat() {
+function showWorkspace(s) {
+  if (s) setStage(s);                       // set the stage before showing, so nothing animates on arrival
   landing.hidden = true; workspace.hidden = false;
-  repoChip.hidden = changeBtn.hidden = mapBtn.hidden = false;
+  repoChip.hidden = changeBtn.hidden = false;
+  mapBtn.hidden = stage() === "tree";
   repoName.textContent = welcomeRepo.textContent = repoLabel();
   ensureTree();
-  question.focus();
+  if (treeFor === repoId) setTimeout(reframe, 80);
+  if (stage() === "chat") question.focus({ preventScroll: true });
+  else ctaInput.focus({ preventScroll: true });
 }
 
 function leaveChat() {
   workspace.hidden = true; landing.hidden = false;
   repoChip.hidden = changeBtn.hidden = mapBtn.hidden = true;
   backBtn.hidden = !repoReady;
+}
+
+// move from the full-screen tree to the chat; the tree slides to the left
+function goChat(q) {
+  if (!repoReady) return;
+  ctaInput.value = "";
+  setStage("chat");
+  setTimeout(() => Graph.camera(), 700);
+  setTimeout(() => question.focus({ preventScroll: true }), 450);
+  if (q) askQuestion(q);
 }
 
 function setStepper(status) {
@@ -290,7 +367,7 @@ function autosize() {
 function clearThread() {
   inner.querySelectorAll(".msg").forEach((m) => m.remove());
   welcome.hidden = false;
-  cur = null; shown = 0;
+  cur = null; shown = 0; lastDesc = "";
   resetSources();
 }
 
@@ -304,8 +381,9 @@ function addSource(path) {
   const li = document.createElement("li");
   const span = document.createElement("span");
   span.textContent = path;
-  span.title = path;
+  li.title = "Show in the map";
   li.appendChild(span);
+  li.addEventListener("click", () => Graph.focus(path));
   srcList.appendChild(li);
 }
 
@@ -345,6 +423,14 @@ function addAgent() {
   };
 }
 
+function describe(f) {
+  const t = f.target.replace(PARTIAL, "");
+  if (f.action === "list_dir") return t === "." ? "Listing the project root" : `Listing ${t}`;
+  if (f.action === "read_file") return `Reading ${t}`;
+  if (f.action === "search_code") return `Searching “${t}”`;
+  return f.action;
+}
+
 function tickMeta() {
   if (!cur || !t0) return;
   const s = Math.round((Date.now() - t0) / 1000);
@@ -360,8 +446,10 @@ async function loadRepo() {
 
   loadBtn.disabled = true; repoReady = false; asking = false; askGen++; stopTimer(); refresh();
   clearThread(); Graph.clear(); treeFor = null; graphEmpty.hidden = false; pill.hidden = true;
+  mapMeta.textContent = ""; ctaStats.textContent = "";
   sessionId = null; localStorage.removeItem("sessionId");
   backBtn.hidden = true; stepper.hidden = true;
+  setStage("tree");
   setStatus("Submitting…"); setHint("");
   try {
     const d = await api("/repos", post({ repo_url: url }));
@@ -382,8 +470,9 @@ async function pollRepo(my) {
     if (d.status === "ready") {
       repoReady = true; loadBtn.disabled = false; refresh();
       setStatus(`Ready · ${d.chunk_count} chunks indexed`, "ok");
-      setStepper("ready");
-      enterChat();
+      const showStepper = !stepper.hidden;
+      if (showStepper) setStepper("ready");
+      setTimeout(() => { if (my === repoGen) showWorkspace(sessionId ? "chat" : "tree"); }, showStepper ? 500 : 0);
     } else if (d.status === "failed") {
       askGen++; loadBtn.disabled = false; stepper.hidden = true;
       setStatus("Failed: " + d.error, "error");
@@ -406,7 +495,7 @@ async function askQuestion(text) {
 
   question.value = ""; autosize();
   welcome.hidden = true; setHint("");
-  asking = true; refresh(); Graph.reset(); resetSources(); shown = 0;
+  asking = true; refresh(); Graph.reset(); resetSources(); shown = 0; lastDesc = "";
   addUser(q);
   cur = addAgent();
   scrollDown(true);
@@ -440,10 +529,11 @@ async function pollAnswer(my) {
 
     d.findings.slice(shown).forEach(addStep);
     shown = d.findings.length;
+    if (shown) lastDesc = describe(d.findings[shown - 1]);
 
     Graph.setActive(running);
     pill.hidden = !running;
-    pill.textContent = `Exploring · ${shown} step${shown === 1 ? "" : "s"}`;
+    pill.textContent = lastDesc ? `${lastDesc} · step ${shown}` : "Starting…";
     scrollDown();
 
     if (running) {
@@ -470,6 +560,7 @@ function addStep(f) {
   badge.classList.add(f.action);
   li.querySelector("code").textContent = f.target;
   li.querySelector("pre").textContent = f.result_summary;
+  li.querySelector("summary").addEventListener("mouseenter", () => Graph.focus(f.target));
   cur.steps.appendChild(li);
 }
 
@@ -495,7 +586,7 @@ function finish(d) {
     catch { cur.copy.textContent = "Copy failed"; }
   };
   scrollDown();
-  question.focus();
+  question.focus({ preventScroll: true });
 }
 
 function fail(message) {
@@ -515,6 +606,7 @@ function fail(message) {
 // ---- wiring
 loadBtn.addEventListener("click", loadRepo);
 repoUrlInput.addEventListener("keydown", (e) => { if (e.key === "Enter") loadRepo(); });
+
 askBtn.addEventListener("click", () => askQuestion());
 question.addEventListener("input", autosize);
 question.addEventListener("keydown", (e) => {
@@ -524,19 +616,38 @@ welcome.addEventListener("click", (e) => {
   const b = e.target.closest("[data-q]");
   if (b) askQuestion(b.dataset.q);
 });
+
+ctaGo.addEventListener("click", () => goChat(ctaInput.value.trim()));
+ctaInput.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing) goChat(ctaInput.value.trim()); });
+cta.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-q]");
+  if (b) goChat(b.dataset.q);
+});
+
 changeBtn.addEventListener("click", leaveChat);
 $("brand").addEventListener("click", (e) => { e.preventDefault(); if (!workspace.hidden) leaveChat(); });
-backBtn.addEventListener("click", enterChat);
+backBtn.addEventListener("click", () => showWorkspace());
+
 mapBtn.addEventListener("click", () => {
-  workspace.classList.toggle("map-on");
-  setTimeout(() => Graph.refit(), 250);
+  const off = workspace.classList.toggle("map-off");
+  mapBtn.textContent = off ? "Show map" : "Hide map";
+  setTimeout(reframe, 700);
 });
 fitBtn.addEventListener("click", () => Graph.refit());
+expandBtn.addEventListener("click", () => {
+  expanded = !expanded;
+  if (expanded) Graph.expandAll(); else Graph.collapse();
+  expandBtn.textContent = expanded ? "Collapse" : "Expand all";
+  reframe();
+});
+
 let resizeTimer;
-window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => Graph.refit(), 200); });
+window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(reframe, 200); });
 
 // ---- start
-workspace.classList.toggle("map-on", !matchMedia("(max-width: 900px)").matches);
+const small = matchMedia("(max-width: 900px)").matches;
+workspace.classList.toggle("map-off", small);        // on a phone the map starts as a closed drawer
+mapBtn.textContent = small ? "Show map" : "Hide map";
 repoUrlInput.value = localStorage.getItem("repoUrl") || "";
 setHint("");
 refresh();

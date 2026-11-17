@@ -3,6 +3,8 @@
   --accent:#2fe38f;--blue:#5aa9ff;--green:#2fe38f;--violet:#b18cff;
   --mono:ui-monospace,Menlo,Consolas,monospace;
 }
+@property --mapw{syntax:"<length-percentage>";inherits:false;initial-value:100%}
+
 *{box-sizing:border-box;scrollbar-width:thin;scrollbar-color:#2a2a2a transparent}
 [hidden]{display:none!important}
 html,body{height:100%}
@@ -12,6 +14,7 @@ body{
   font:14px/1.55 "Inter",system-ui,-apple-system,"Segoe UI",sans-serif;
 }
 button{font:inherit}
+.dot{flex:none;width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent)}
 
 /* ---------- top bar ---------- */
 .topbar{
@@ -28,7 +31,6 @@ button{font:inherit}
   display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:20px;
   border:1px solid #262626;background:#0a0a0a;font:12px var(--mono);color:#cfcfcf;
 }
-.chip .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent)}
 .ghost{
   padding:7px 14px;border-radius:8px;border:1px solid #2a2a2a;
   background:transparent;color:#cfcfcf;font-size:13px;cursor:pointer;
@@ -74,11 +76,136 @@ button{font:inherit}
 @keyframes pulse{50%{box-shadow:0 0 14px rgba(47,227,143,.45)}}
 .back{margin-top:22px}
 
-/* ---------- workspace ---------- */
-.workspace{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 340px}
-.workspace:not(.map-on){grid-template-columns:minmax(0,1fr)}
-.workspace:not(.map-on) .map{display:none}
-.chat{display:flex;flex-direction:column;min-width:0;min-height:0}
+/* ---------- workspace: map on the left, chat on the right ---------- */
+.workspace{
+  --mapw:100%;
+  flex:1;min-height:0;overflow:hidden;display:grid;
+  grid-template-columns:var(--mapw) minmax(0,1fr);
+  transition:--mapw .65s cubic-bezier(.22,.8,.24,1);
+}
+.workspace.stage-chat{--mapw:420px}
+.workspace.stage-chat.map-off{--mapw:0px}
+
+.map{position:relative;min-width:0;min-height:0;overflow:hidden;background:#050505}
+.workspace.stage-chat .map{border-right:1px solid var(--line)}
+.map-inner{
+  height:100%;min-width:0;display:flex;flex-direction:column;gap:12px;
+  padding:20px 5vw;transition:padding .65s;
+}
+.workspace.stage-chat .map-inner{padding:14px}
+.workspace.stage-tree .files-card{display:none}
+.workspace.stage-chat .cta{display:none}
+
+.chat{
+  display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden;
+  transition:opacity .45s;
+}
+.workspace.stage-tree .chat{opacity:0;pointer-events:none}
+
+/* ---------- map cards ---------- */
+.map-card{flex:none;background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.tree-card{flex:1;min-height:200px;display:flex;flex-direction:column}
+.map-head{
+  display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 12px;
+  font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:1.2px;
+  color:var(--muted);border-bottom:1px solid var(--line);
+}
+.map-head em{margin-left:8px;font-style:normal;font-weight:400;text-transform:none;letter-spacing:0;color:#5e5e5e}
+.head-actions{display:flex;gap:6px}
+.icon-btn{
+  padding:3px 10px;font-size:11px;border-radius:7px;border:1px solid #2a2a2a;
+  background:#141414;color:#cfcfcf;cursor:pointer;text-transform:none;letter-spacing:0;
+}
+.icon-btn:hover{border-color:var(--accent)}
+#graph-pane{
+  position:relative;flex:1;min-height:0;overflow:hidden;
+  background:radial-gradient(400px 260px at 80% 0%,rgba(47,227,143,.06),transparent 70%),#050505;
+}
+#graph{width:100%;height:100%;cursor:grab}
+#graph-empty{
+  position:absolute;inset:0;display:grid;place-items:center;margin:0;padding:0 20px;
+  text-align:center;color:var(--muted);font-size:12px;pointer-events:none;
+}
+#pill{
+  position:absolute;bottom:10px;left:10px;max-width:calc(100% - 20px);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  padding:5px 12px;border-radius:20px;font:11px var(--mono);
+  background:rgba(10,10,10,.92);border:1px solid var(--accent);box-shadow:0 0 14px rgba(47,227,143,.3);
+}
+#pill::before{
+  content:"";display:inline-block;width:7px;height:7px;margin-right:7px;
+  border-radius:50%;background:var(--accent);animation:blink 1s infinite;
+}
+@keyframes blink{50%{opacity:.25}}
+#legend{
+  display:flex;flex-wrap:wrap;gap:5px 12px;padding:8px 12px;
+  border-top:1px solid var(--line);font-size:11px;color:var(--muted);
+}
+#legend i{display:inline-block;width:8px;height:8px;margin-right:5px;border-radius:50%;border:1px solid}
+
+.src-list{list-style:none;margin:0;padding:6px 12px;max-height:170px;overflow:auto}
+.src-list li{
+  display:flex;align-items:center;gap:8px;padding:4px 0;cursor:pointer;
+  font:12px var(--mono);color:#b5b5b5;animation:in .3s ease both;
+}
+.src-list li:hover{color:#fff}
+.src-list li::before{content:"";flex:none;width:6px;height:6px;border-radius:50%;background:var(--green)}
+.src-list span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.empty{margin:0;padding:12px;color:#5e5e5e;font-size:12px}
+
+/* the ask box under the full tree */
+.cta{
+  flex:none;width:min(720px,100%);margin:0 auto;padding:16px 18px;text-align:center;
+  background:#0a0a0a;border:1px solid #262626;border-radius:16px;
+  box-shadow:0 0 40px rgba(47,227,143,.06);
+}
+.cta-title{display:flex;align-items:center;justify-content:center;gap:8px;font-weight:600}
+.cta-title span:last-child{font-weight:400;color:var(--muted);font-size:12px}
+.cta p{margin:6px 0 12px;color:#777;font-size:13px}
+.cta-row{display:flex;gap:8px}
+.cta-row input{
+  flex:1;min-width:0;padding:11px 14px;border-radius:10px;border:1px solid #222;
+  background:#050505;color:var(--text);font:inherit;outline:none;
+}
+.cta-row input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(47,227,143,.15)}
+.cta .chips{margin-top:12px}
+
+/* ---------- the tree drawing ---------- */
+.link{stroke:#2a2a2a;stroke-width:1.2px}
+.node,.link{transition:opacity .3s}
+.node{color:var(--muted);cursor:default}
+.node circle.body{fill:#0b0b0b;stroke:#333}
+.node.dir circle.body{fill:#141414;stroke:#555}
+.node.seen circle.body{stroke:#777}
+.node.listed{color:var(--blue)}
+.node.listed circle.body{fill:#1a3358;stroke:var(--blue)}
+.node.match{color:var(--violet)}
+.node.match circle.body{fill:#33235a;stroke:var(--violet)}
+.node.read{color:var(--green)}
+.node.read circle.body{fill:#0d4a33;stroke:var(--green)}
+.node.visited circle.body{filter:drop-shadow(0 0 6px currentColor)}
+.node.dir:hover circle.body{stroke:var(--accent)}
+.halo{fill:none;stroke:var(--accent);stroke-width:2;opacity:0;transform-box:fill-box;transform-origin:center}
+.node.current .halo{animation:halo 1.4s ease-out infinite}
+@keyframes halo{from{opacity:.9;transform:scale(1)}to{opacity:0;transform:scale(3.2)}}
+.node text{
+  fill:#b5b5b5;font:11px var(--mono);opacity:0;pointer-events:none;
+  paint-order:stroke;stroke:#050505;stroke-width:3px;
+}
+.node.show text,.node.visited text{opacity:.95}
+/* zoomed far out: only the top folders keep their labels, kept readable */
+#graph.far .node text{opacity:0}
+#graph.far .node.top text,#graph.far .node.visited text{
+  opacity:.95;font-size:calc(11px / var(--k,1));stroke-width:calc(3px / var(--k,1));
+}
+/* while the agent works, fade everything it has not touched */
+#graph.exploring .node:not(.visited):not(.seen):not(.current){opacity:.38}
+#graph.exploring .link{opacity:.5}
+.trail{
+  fill:none;stroke:var(--accent);stroke-width:1.6;stroke-dasharray:6 5;
+  animation:dash 1s linear infinite;filter:drop-shadow(0 0 4px var(--accent));
+}
+@keyframes dash{to{stroke-dashoffset:-22}}
 
 /* ---------- thread ---------- */
 .thread{flex:1;min-height:0;overflow-y:auto;padding:28px 24px 12px}
@@ -108,7 +235,6 @@ button{font:inherit}
 .avatar.big{width:48px;height:48px;margin:0 auto;font-size:22px}
 .msg.agent .body{flex:1;min-width:0}
 
-/* the agent's steps, collapsible */
 .trace{border:1px solid var(--line);border-radius:12px;background:#080808;margin-bottom:12px}
 .trace>summary{
   display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;
@@ -145,7 +271,6 @@ button{font:inherit}
 .badge.read_file{background:var(--green)}
 .badge.search_code{background:var(--violet)}
 
-/* the answer */
 .markdown{line-height:1.7;overflow-wrap:anywhere}
 .markdown>:first-child{margin-top:0}
 .markdown h1,.markdown h2,.markdown h3{margin:1.2em 0 .5em;letter-spacing:-.01em}
@@ -185,90 +310,16 @@ button{font:inherit}
 .hint{max-width:760px;margin:8px auto 0;text-align:center;color:#5e5e5e;font-size:12px}
 .hint.error{color:#ff6b7a}
 
-/* ---------- right column ---------- */
-.map{
-  display:flex;flex-direction:column;gap:12px;min-height:0;overflow-y:auto;
-  padding:16px;background:#050505;border-left:1px solid var(--line);
-}
-.map-card{flex:none;background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden}
-.map-head{
-  display:flex;align-items:center;justify-content:space-between;padding:9px 12px;
-  font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:1.2px;
-  color:var(--muted);border-bottom:1px solid var(--line);
-}
-.icon-btn{
-  padding:3px 10px;font-size:11px;border-radius:7px;border:1px solid #2a2a2a;
-  background:#141414;color:#cfcfcf;cursor:pointer;text-transform:none;letter-spacing:0;
-}
-.icon-btn:hover{border-color:var(--accent)}
-#graph-pane{
-  position:relative;overflow:hidden;height:min(44vh,400px);min-height:240px;
-  background:radial-gradient(260px 200px at 80% 0%,rgba(47,227,143,.06),transparent 70%),#050505;
-}
-#graph{width:100%;height:100%;cursor:grab}
-#graph-empty{
-  position:absolute;inset:0;display:grid;place-items:center;margin:0;padding:0 20px;
-  text-align:center;color:var(--muted);font-size:12px;pointer-events:none;
-}
-#pill{
-  position:absolute;bottom:10px;left:10px;padding:5px 12px;border-radius:20px;font-size:11px;
-  background:rgba(10,10,10,.9);border:1px solid var(--accent);box-shadow:0 0 14px rgba(47,227,143,.3);
-}
-#pill::before{
-  content:"";display:inline-block;width:7px;height:7px;margin-right:7px;
-  border-radius:50%;background:var(--accent);animation:blink 1s infinite;
-}
-@keyframes blink{50%{opacity:.25}}
-#legend{
-  display:flex;flex-wrap:wrap;gap:5px 12px;padding:8px 12px;
-  border-top:1px solid var(--line);font-size:11px;color:var(--muted);
-}
-#legend i{display:inline-block;width:8px;height:8px;margin-right:5px;border-radius:50%;border:1px solid}
-.src-list{list-style:none;margin:0;padding:6px 12px;max-height:220px;overflow:auto}
-.src-list li{
-  display:flex;align-items:center;gap:8px;padding:4px 0;
-  font:12px var(--mono);color:#b5b5b5;animation:in .3s ease both;
-}
-.src-list li::before{content:"";flex:none;width:6px;height:6px;border-radius:50%;background:var(--green)}
-.src-list span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.empty{margin:0;padding:12px;color:#5e5e5e;font-size:12px}
-
-/* ---------- tree drawing ---------- */
-.link{stroke:#2a2a2a;stroke-width:1.2px}
-.node{color:var(--muted)}
-.node circle.body{fill:#0b0b0b;stroke:#333}
-.node.dir circle.body{fill:#141414;stroke:#555}
-.node.seen circle.body{stroke:#777}
-.node.listed{color:var(--blue)}
-.node.listed circle.body{fill:#1a3358;stroke:var(--blue)}
-.node.match{color:var(--violet)}
-.node.match circle.body{fill:#33235a;stroke:var(--violet)}
-.node.read{color:var(--green)}
-.node.read circle.body{fill:#0d4a33;stroke:var(--green)}
-.node.visited circle.body{filter:drop-shadow(0 0 6px currentColor)}
-.halo{fill:none;stroke:var(--accent);stroke-width:2;opacity:0;transform-box:fill-box;transform-origin:center}
-.node.current .halo{animation:halo 1.4s ease-out infinite}
-@keyframes halo{from{opacity:.9;transform:scale(1)}to{opacity:0;transform:scale(3.2)}}
-.node text{
-  fill:#b5b5b5;font:11px var(--mono);opacity:0;pointer-events:none;
-  paint-order:stroke;stroke:#050505;stroke-width:3px;
-}
-.node.show text,.node.visited text{opacity:.95}
-.node.dir:hover circle.body{stroke:var(--accent)}
-.trail{
-  fill:none;stroke:var(--accent);stroke-width:1.6;stroke-dasharray:6 5;
-  animation:dash 1s linear infinite;filter:drop-shadow(0 0 4px var(--accent));
-}
-@keyframes dash{to{stroke-dashoffset:-22}}
-
-/* ---------- small screens: the map becomes a drawer ---------- */
+/* ---------- small screens: the map becomes a drawer on the left ---------- */
 @media(max-width:900px){
   .topbar{padding:0 14px}
-  .workspace{grid-template-columns:minmax(0,1fr)}
-  .map{
-    position:fixed;top:56px;right:0;bottom:0;width:min(92vw,360px);z-index:20;
-    box-shadow:-20px 0 60px #000;
+  .workspace.stage-chat{grid-template-columns:minmax(0,1fr)}
+  .workspace.stage-chat .map{
+    position:fixed;top:56px;left:0;bottom:0;width:min(92vw,380px);z-index:20;
+    box-shadow:20px 0 60px #000;
   }
+  .workspace.stage-chat.map-off .map{display:none}
+  .map-inner{padding:14px}
   .thread{padding:20px 14px 8px}
   .composer-wrap{padding:8px 14px 12px}
   .landing{padding-top:6vh}
