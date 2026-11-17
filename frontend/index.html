@@ -12,17 +12,17 @@
 </head>
 <body>
 
-  <!-- top navigation bar -->
-  <header class="nav">
-    <a class="brand" href="#">RepoOnboard</a>
-    <nav>
-      <a href="#workspace">Agent</a>
-      <a class="btn solid" href="#repo-url">Try it</a>
-    </nav>
+  <header class="topbar">
+    <a class="brand" id="brand" href="#">RepoOnboard</a>
+    <div class="top-right">
+      <div id="repo-chip" class="chip" hidden><span class="dot"></span><span id="repo-name"></span></div>
+      <button id="change-btn" class="ghost" hidden>Change repo</button>
+      <button id="map-btn" class="ghost" hidden>Map</button>
+    </div>
   </header>
 
-  <!-- hero: headline + repository input -->
-  <section class="hero">
+  <!-- step 1: choose a repository -->
+  <section id="landing" class="landing">
     <h1>Understand any<br>codebase in <em>minutes</em></h1>
     <p class="sub">Paste a GitHub repository, ask a question, and watch the agent explore folders, read files and search code to find the answer.</p>
 
@@ -31,45 +31,66 @@
       <button id="load-btn" class="primary">Load</button>
     </div>
     <p id="repo-status" class="status"></p>
+    <ol id="stepper" class="stepper" hidden>
+      <li>Clone</li><li>Parse</li><li>Index</li>
+    </ol>
+    <button id="back-btn" class="ghost back" hidden>← Back to chat</button>
   </section>
 
-  <!-- workspace: questions on the left, repo tree on the right -->
-  <div class="workspace" id="workspace">
-    <aside id="panel">
-      <section class="card">
-        <h2>Ask the agent</h2>
-        <div class="row">
-          <input id="question" type="text" placeholder="How does this project work?" disabled>
-          <button id="ask-btn" class="primary" disabled>Ask</button>
+  <!-- step 2: chat on the left, map + sources on the right -->
+  <div id="workspace" class="workspace map-on" hidden>
+    <section class="chat">
+      <div id="thread" class="thread">
+        <div id="thread-inner" class="thread-inner">
+          <div id="welcome" class="welcome">
+            <div class="avatar big">◈</div>
+            <h2>Ask anything about <span id="welcome-repo">this repository</span></h2>
+            <p>The agent explores folders, reads files and searches the code. Every step is shown so you can check the answer.</p>
+            <div class="chips">
+              <button class="chip-btn" data-q="What is the project structure and what does each main folder contain?">Project structure</button>
+              <button class="chip-btn" data-q="How does the main entry point work?">Main entry point</button>
+              <button class="chip-btn" data-q="Where are the tests and how are they organized?">Tests</button>
+              <button class="chip-btn" data-q="How do I set up this project for development?">Dev setup</button>
+            </div>
+          </div>
         </div>
-        <p id="ask-status" class="status"></p>
-      </section>
-
-      <section class="card tabs-card" id="output-card" hidden>
-        <div class="tabs">
-          <button class="tab active" id="tab-activity">Activity <span id="step-count" class="count"></span></button>
-          <button class="tab" id="tab-answer" disabled>Answer</button>
-          <button id="expand-btn" class="icon-btn" hidden>Expand ⤢</button>
-        </div>
-        <div class="tab-body">
-          <ol id="findings"></ol>
-          <div id="answer" class="markdown" hidden></div>
-        </div>
-      </section>
-    </aside>
-
-    <main id="graph-pane">
-      <svg id="graph"></svg>
-      <div id="legend">
-        <span><i style="background:#141414;border-color:#555"></i>folder</span>
-        <span><i style="background:#0b0b0b;border-color:#333"></i>file</span>
-        <span><i style="background:#1a3358;border-color:#5aa9ff"></i>listed</span>
-        <span><i style="background:#0d4a33;border-color:#2fe38f"></i>read</span>
-        <span><i style="background:#33235a;border-color:#b18cff"></i>search hit</span>
       </div>
-      <div id="pill" hidden></div>
-      <p id="graph-empty">The repository tree appears here once a repo is loaded.</p>
-    </main>
+
+      <div class="composer-wrap">
+        <div class="composer">
+          <textarea id="question" rows="1" placeholder="Ask anything about this repository…" disabled></textarea>
+          <button id="ask-btn" class="send" aria-label="Send" disabled>↑</button>
+        </div>
+        <p id="ask-status" class="hint"></p>
+      </div>
+    </section>
+
+    <aside id="map" class="map">
+      <div class="map-card">
+        <div class="map-head">
+          <span>Repository map</span>
+          <button id="fit-btn" class="icon-btn" title="Fit the whole tree in view">Fit</button>
+        </div>
+        <div id="graph-pane">
+          <svg id="graph"></svg>
+          <p id="graph-empty">The repository tree appears here.</p>
+          <div id="pill" hidden></div>
+        </div>
+        <div id="legend">
+          <span><i style="background:#141414;border-color:#555"></i>folder</span>
+          <span><i style="background:#0b0b0b;border-color:#333"></i>file</span>
+          <span><i style="background:#1a3358;border-color:#5aa9ff"></i>listed</span>
+          <span><i style="background:#0d4a33;border-color:#2fe38f"></i>read</span>
+          <span><i style="background:#33235a;border-color:#b18cff"></i>hit</span>
+        </div>
+      </div>
+
+      <div class="map-card">
+        <div class="map-head"><span>Files read</span></div>
+        <ul id="src-list" class="src-list"></ul>
+        <p id="src-empty" class="empty">Files the agent opens will be listed here.</p>
+      </div>
+    </aside>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>

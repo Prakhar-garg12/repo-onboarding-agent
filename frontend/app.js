@@ -3,27 +3,23 @@ const $ = (id) => document.getElementById(id);
 const PARTIAL = / \(from character \d+\)$/;
 const normalize = (p) => (String(p || ".").trim().replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/, "") || ".");
 
-// tree
+// ---------------------------------------------------------------- tree
 const Graph = (() => {
   const pane = $("graph-pane");
   const svg = d3.select("#graph");
-  const vp = svg.append("g");                      
+  const vp = svg.append("g");                      // everything inside here pans/zooms
   const linkG = vp.append("g"), trailG = vp.append("g"), nodeG = vp.append("g");
   const zoom = d3.zoom().scaleExtent([0.2, 4]).on("zoom", (e) => vp.attr("transform", e.transform));
   svg.call(zoom).on("dblclick.zoom", null);
 
-  const ROW = 22;    // vertical space between nodes
-  const COL = 200;   // horizontal space between levels
+  const ROW = 20;    // vertical space between nodes
+  const COL = 130;   // horizontal space between levels (small, because the panel is narrow)
 
-  let byId = new Map();          // id -> node
-  let kids = new Map();          // folder id -> its children (sorted)
-  let open = new Set(["."]);     // folders that are currently expanded
-  let laid = new Map();          // id -> position computed by d3.tree
-  let nodeSel = null;
-  let trail = [], pos = ".", active = false;
+  let byId = new Map(), kids = new Map(), laid = new Map();
+  let open = new Set(["."]);
+  let nodeSel = null, trail = [], pos = ".", active = false;
   const sets = { listed: new Set(), read: new Set(), match: new Set(), seen: new Set() };
 
-  // 1) receive the flat list from the backend and build lookups
   function setTree(data) {
     clear();
     const nodes = data.nodes.map((n) => ({ ...n }));
@@ -34,7 +30,6 @@ const Graph = (() => {
       if (!kids.has(n.parent)) kids.set(n.parent, []);
       kids.get(n.parent).push(n);
     });
-    // folders first, then files, each A-Z
     kids.forEach((list) =>
       list.sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === "dir" ? -1 : 1))
     );
@@ -44,12 +39,10 @@ const Graph = (() => {
 
   const radius = (n) => (n.id === "." ? 8 : n.type === "dir" ? 5 : 3);
 
-  // 2) draw only the folders that are open
   function render(refit) {
     if (!byId.has(".")) return;
-
     const root = d3.hierarchy(byId.get("."), (d) => (open.has(d.id) ? kids.get(d.id) : null));
-    d3.tree().nodeSize([ROW, COL])(root);        // d3 sets .x (vertical) and .y (horizontal)
+    d3.tree().nodeSize([ROW, COL])(root);
     const list = root.descendants();
     laid = new Map(list.map((d) => [d.data.id, d]));
 
@@ -72,11 +65,10 @@ const Graph = (() => {
         g.append("title").text((d) => d.data.id);
         return g;
       })
-      .classed("show", true)                      // always show labels in a tree
+      .classed("show", true)
       .style("cursor", (d) => (kids.has(d.data.id) ? "pointer" : "default"))
       .attr("transform", (d) => `translate(${d.y},${d.x})`);
 
-    // a closed folder gets a "+" so you know you can click it
     nodeSel.select("text").text((d) => {
       const n = d.data;
       const closed = n.type === "dir" && kids.has(n.id) && !open.has(n.id);
@@ -87,7 +79,6 @@ const Graph = (() => {
     if (refit) fit(list);
   }
 
-  // 3) colours + the dashed trail of the agent's path
   function paint() {
     if (!nodeSel) return;
     nodeSel
@@ -104,30 +95,55 @@ const Graph = (() => {
       .attr("class", "trail")
       .attr("d", (t) => {
         const a = laid.get(t.from), b = laid.get(t.to);
-        if (!a || !b) return null;                
+        if (!a || !b) return null;
         const mid = (a.y + b.y) / 2;
         return `M${a.y},${a.x}C${mid},${a.x} ${mid},${b.x} ${b.y},${b.x}`;
       });
   }
 
+  // show the whole tree
   function fit(list) {
+    if (!list || !list.length) return;
     const w = pane.clientWidth, h = pane.clientHeight;
+    if (!w || !h) return;
     const [x0, x1] = d3.extent(list, (n) => n.x), [y0, y1] = d3.extent(list, (n) => n.y);
-    const k = Math.min(1.2, 0.9 * Math.min(w / (y1 - y0 + COL), h / (x1 - x0 + 60)));
+    const k = Math.max(0.4, Math.min(1.2, 0.9 * Math.min(w / (y1 - y0 + COL), h / (x1 - x0 + 60))));
     svg.transition().duration(500).call(
       zoom.transform,
-      d3.zoomIdentity.translate(50 - k * y0, h / 2 - (k * (x0 + x1)) / 2).scale(k)
+      d3.zoomIdentity.translate(24 - k * y0, h / 2 - (k * (x0 + x1)) / 2).scale(k)
     );
   }
 
-  // click a folder to open / close it
+  // keep the agent's current node in view
+  function follow(id) {
+    const n = laid.get(id);
+    if (!n) return;
+    const w = pane.clientWidth, h = pane.clientHeight, k = 0.9;
+    if (!w || !h) return;
+    svg.transition().duration(500).call(
+      zoom.transform,
+      d3.zoomIdentity.translate(w * 0.4 - k * n.y, h / 2 - k * n.x).scale(k)
+    );
+  }
+
+  // small tree: show everything. big tree: follow the agent.
+  function camera() {
+    const list = Array.from(laid.values());
+    if (!list.length) return;
+    const w = pane.clientWidth, h = pane.clientHeight;
+    const [x0, x1] = d3.extent(list, (n) => n.x), [y0, y1] = d3.extent(list, (n) => n.y);
+    if ((y1 - y0 + COL) * 0.9 <= w && (x1 - x0 + 60) * 0.9 <= h) fit(list);
+    else follow(pos);
+  }
+
+  function refit() { fit(Array.from(laid.values())); }
+
   function toggle(id) {
     if (!kids.has(id)) return;
     open.has(id) ? open.delete(id) : open.add(id);
     render(false);
   }
 
-  // open every folder above a node so the node is visible
   function reveal(id) {
     let p = byId.get(id) && byId.get(id).parent;
     while (p !== null && p !== undefined) {
@@ -136,7 +152,6 @@ const Graph = (() => {
     }
   }
 
-  // called for every step the agent takes
   function apply(f) {
     const path = normalize(f.target.replace(PARTIAL, ""));
     let hits = [];
@@ -158,10 +173,11 @@ const Graph = (() => {
       if (pos !== hits[0]) trail.push({ from: pos, to: hits[0] });
       pos = hits[0];
     }
-    render(true);
+    render(false);
+    if (hits.length) camera();
   }
 
-  function reset(on = false) {            // forget the exploration, keep the map
+  function reset(on = false) {            // forget the exploration, keep the tree
     Object.values(sets).forEach((s) => s.clear());
     trail = []; pos = "."; active = on;
     open = new Set(["."]);
@@ -174,27 +190,38 @@ const Graph = (() => {
     [linkG, trailG, nodeG].forEach((g) => g.selectAll("*").remove());
   }
 
-  return { setTree, apply, reset, clear, setActive: (on) => { active = on; paint(); } };
+  return { setTree, apply, reset, clear, refit, setActive: (on) => { active = on; paint(); } };
 })();
 
 // ---------------------------------------------------------------- page
+const landing = $("landing"), workspace = $("workspace");
 const repoUrlInput = $("repo-url"), loadBtn = $("load-btn"), repoStatus = $("repo-status");
-const questionInput = $("question"), askBtn = $("ask-btn"), askStatus = $("ask-status");
-const outputCard = $("output-card"), findingsList = $("findings"), answerBox = $("answer");
-const tabActivity = $("tab-activity"), tabAnswer = $("tab-answer");
-const expandBtn = $("expand-btn"), stepCount = $("step-count");
-const tabBody = document.querySelector(".tab-body"), workspace = $("workspace");
+const stepper = $("stepper"), stepEls = [...stepper.children], backBtn = $("back-btn");
+const repoChip = $("repo-chip"), repoName = $("repo-name");
+const changeBtn = $("change-btn"), mapBtn = $("map-btn"), fitBtn = $("fit-btn");
+const thread = $("thread"), inner = $("thread-inner");
+const welcome = $("welcome"), welcomeRepo = $("welcome-repo");
+const question = $("question"), askBtn = $("ask-btn"), hint = $("ask-status");
 const graphEmpty = $("graph-empty"), pill = $("pill");
+const srcList = $("src-list"), srcEmpty = $("src-empty");
+
+const DEFAULT_HINT = "The agent can make mistakes. Open the steps to check what it actually read.";
 
 let repoId = localStorage.getItem("repoId");
 let sessionId = localStorage.getItem("sessionId");
-let repoReady = false, asking = false, shown = 0, timer = null;
-let answerReady = false, justLoaded = false;
+let repoReady = false, asking = false, shown = 0, timer = null, t0 = 0;
 let repoGen = 0, askGen = 0, treeFor = null, treeReady = Promise.resolve();
+let cur = null, stick = true;
+const sources = new Set();
 
 const post = (body) => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-const setStatus = (el, text, kind = "") => { el.textContent = text; el.className = "status " + kind; };
-const refresh = () => { const on = repoReady && !asking; questionInput.disabled = askBtn.disabled = !on; };
+const setStatus = (text, kind = "") => { repoStatus.textContent = text; repoStatus.className = "status " + kind; };
+const setHint = (text, kind = "") => { hint.textContent = text || DEFAULT_HINT; hint.className = "hint " + kind; };
+
+function refresh() {
+  question.disabled = !repoReady;
+  askBtn.disabled = !repoReady || asking;
+}
 
 async function api(path, options) {
   let res;
@@ -209,7 +236,8 @@ async function api(path, options) {
 }
 
 function ensureTree() {
-  if (repoId && treeFor !== repoId) {
+  // the tree is measured on screen, so it can only be drawn while the workspace is visible
+  if (repoId && treeFor !== repoId && !workspace.hidden) {
     const id = (treeFor = repoId);
     treeReady = api(`/repos/${id}/tree`)
       .then((d) => { Graph.setTree(d); graphEmpty.hidden = true; })
@@ -218,59 +246,132 @@ function ensureTree() {
   return treeReady;
 }
 
-function startTimer() {
-  stopTimer();
-  const t0 = Date.now();
-  const tick = () => setStatus(askStatus, `The agent is exploring… ${Math.round((Date.now() - t0) / 1000)}s`);
-  tick();
-  timer = setInterval(tick, 1000);
+// ---- screens
+function repoLabel() {
+  const u = (repoUrlInput.value || localStorage.getItem("repoUrl") || "")
+    .trim().replace(/\/+$/, "").replace(/\.git$/, "");
+  return u.split("/").slice(-2).join("/") || "this repository";
 }
+
+function enterChat() {
+  landing.hidden = true; workspace.hidden = false;
+  repoChip.hidden = changeBtn.hidden = mapBtn.hidden = false;
+  repoName.textContent = welcomeRepo.textContent = repoLabel();
+  ensureTree();
+  question.focus();
+}
+
+function leaveChat() {
+  workspace.hidden = true; landing.hidden = false;
+  repoChip.hidden = changeBtn.hidden = mapBtn.hidden = true;
+  backBtn.hidden = !repoReady;
+}
+
+function setStepper(status) {
+  stepper.hidden = false;
+  const idx = status === "ready" ? stepEls.length : Math.max(0, ["cloning", "parsing", "indexing"].indexOf(status));
+  stepEls.forEach((li, i) => { li.classList.toggle("done", i < idx); li.classList.toggle("active", i === idx); });
+}
+
+// ---- thread helpers
+thread.addEventListener("scroll", () => {
+  stick = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 140;
+});
+function scrollDown(force) {
+  if (force) stick = true;
+  if (stick) thread.scrollTop = thread.scrollHeight;
+}
+
+function autosize() {
+  question.style.height = "auto";
+  question.style.height = Math.min(question.scrollHeight, 160) + "px";
+}
+
+function clearThread() {
+  inner.querySelectorAll(".msg").forEach((m) => m.remove());
+  welcome.hidden = false;
+  cur = null; shown = 0;
+  resetSources();
+}
+
+function resetSources() {
+  sources.clear(); srcList.innerHTML = ""; srcEmpty.hidden = false;
+}
+function addSource(path) {
+  if (sources.has(path)) return;
+  sources.add(path);
+  srcEmpty.hidden = true;
+  const li = document.createElement("li");
+  const span = document.createElement("span");
+  span.textContent = path;
+  span.title = path;
+  li.appendChild(span);
+  srcList.appendChild(li);
+}
+
+function addUser(text) {
+  const el = document.createElement("div");
+  el.className = "msg user";
+  const bubble = document.createElement("div");
+  bubble.className = "bubble";
+  bubble.textContent = text;
+  el.appendChild(bubble);
+  inner.appendChild(el);
+}
+
+function addAgent() {
+  const el = document.createElement("div");
+  el.className = "msg agent";
+  el.innerHTML = `
+    <div class="avatar">◈</div>
+    <div class="body">
+      <details class="trace" open>
+        <summary><span class="spin"></span><span class="t-title">Exploring the repository…</span><span class="t-meta"></span></summary>
+        <ol class="steps"></ol>
+      </details>
+      <div class="answer markdown" hidden></div>
+      <div class="actions" hidden><button class="mini copy">Copy answer</button></div>
+    </div>`;
+  inner.appendChild(el);
+  return {
+    el,
+    trace: el.querySelector(".trace"),
+    title: el.querySelector(".t-title"),
+    meta: el.querySelector(".t-meta"),
+    steps: el.querySelector(".steps"),
+    answer: el.querySelector(".answer"),
+    actions: el.querySelector(".actions"),
+    copy: el.querySelector(".copy"),
+  };
+}
+
+function tickMeta() {
+  if (!cur || !t0) return;
+  const s = Math.round((Date.now() - t0) / 1000);
+  cur.meta.textContent = `${shown} step${shown === 1 ? "" : "s"} · ${s}s`;
+}
+function startTimer() { stopTimer(); tickMeta(); timer = setInterval(tickMeta, 1000); }
 function stopTimer() { clearInterval(timer); timer = null; }
-
-// ---- tabs
-function closeFull() {
-  outputCard.classList.remove("full");
-  expandBtn.textContent = "Expand ⤢";
-}
-
-function showTab(name) {
-  const answer = name === "answer";
-  if (!answer) closeFull();
-  findingsList.hidden = answer;
-  answerBox.hidden = !answer;
-  tabActivity.classList.toggle("active", !answer);
-  tabAnswer.classList.toggle("active", answer);
-  expandBtn.hidden = !(answer && answerReady);
-  tabBody.scrollTop = 0;
-}
-
-function clearRun() {
-  shown = 0; answerReady = false;
-  findingsList.innerHTML = ""; answerBox.innerHTML = ""; stepCount.textContent = "";
-  pill.hidden = true;
-  Graph.reset();
-}
 
 // ---- repository
 async function loadRepo() {
   const url = repoUrlInput.value.trim();
-  if (!url) return setStatus(repoStatus, "Please enter a repository URL.", "error");
+  if (!url) return setStatus("Please enter a repository URL.", "error");
 
   loadBtn.disabled = true; repoReady = false; asking = false; askGen++; stopTimer(); refresh();
-  clearRun(); outputCard.hidden = true; closeFull();
+  clearThread(); Graph.clear(); treeFor = null; graphEmpty.hidden = false; pill.hidden = true;
   sessionId = null; localStorage.removeItem("sessionId");
-  Graph.clear(); treeFor = null; graphEmpty.hidden = false;
-  setStatus(repoStatus, "Submitting…"); setStatus(askStatus, "");
+  backBtn.hidden = true; stepper.hidden = true;
+  setStatus("Submitting…"); setHint("");
   try {
     const d = await api("/repos", post({ repo_url: url }));
     repoId = d.repo_id;
-    justLoaded = true;
     localStorage.setItem("repoId", repoId);
     localStorage.setItem("repoUrl", url);
     pollRepo(++repoGen);
   } catch (e) {
     loadBtn.disabled = false;
-    setStatus(repoStatus, e.message, "error");
+    setStatus(e.message, "error");
   }
 }
 
@@ -280,87 +381,88 @@ async function pollRepo(my) {
     if (my !== repoGen) return;
     if (d.status === "ready") {
       repoReady = true; loadBtn.disabled = false; refresh();
-      setStatus(repoStatus, `Ready · ${d.chunk_count} chunks indexed`, "ok");
-      ensureTree();
-      if (justLoaded) {                      // bring the workspace into view after a fresh load
-        justLoaded = false;
-        workspace.scrollIntoView({ behavior: "smooth" });
-      }
+      setStatus(`Ready · ${d.chunk_count} chunks indexed`, "ok");
+      setStepper("ready");
+      enterChat();
     } else if (d.status === "failed") {
-      loadBtn.disabled = false;
-      setStatus(repoStatus, "Failed: " + d.error, "error");
+      askGen++; loadBtn.disabled = false; stepper.hidden = true;
+      setStatus("Failed: " + d.error, "error");
     } else {
-      setStatus(repoStatus, "Working… " + d.status);
+      setStatus("Working…"); setStepper(d.status);
       setTimeout(() => pollRepo(my), 1500);
     }
   } catch (e) {
     if (my !== repoGen) return;
-    loadBtn.disabled = false;
+    askGen++; loadBtn.disabled = false; stepper.hidden = true;
     if (e.status === 404) { repoId = null; localStorage.removeItem("repoId"); }
-    setStatus(repoStatus, e.status === 404 ? "The backend no longer has this repository. Click Load to add it again." : e.message, "error");
+    setStatus(e.status === 404 ? "The backend no longer has this repository. Click Load to add it again." : e.message, "error");
   }
 }
 
 // ---- questions
-async function askQuestion() {
-  const q = questionInput.value.trim();
-  if (!repoReady || !q) return setStatus(askStatus, repoReady ? "Please type a question." : "Load a repository first.", "error");
+async function askQuestion(text) {
+  const q = (typeof text === "string" ? text : question.value).trim();
+  if (!repoReady || asking || !q) return;
 
-  asking = true; refresh(); clearRun();
-  outputCard.hidden = false; tabAnswer.disabled = true; showTab("activity");
-  setStatus(askStatus, "Sending question…");
+  question.value = ""; autosize();
+  welcome.hidden = true; setHint("");
+  asking = true; refresh(); Graph.reset(); resetSources(); shown = 0;
+  addUser(q);
+  cur = addAgent();
+  scrollDown(true);
+  t0 = Date.now();
   try {
     const d = await api("/ask", post({ repo_id: repoId, question: q }));
     sessionId = d.session_id;
     localStorage.setItem("sessionId", sessionId);
+    startTimer();
     pollAnswer(++askGen);
   } catch (e) {
-    asking = false; refresh();
-    setStatus(askStatus, e.message, "error");
+    fail(e.message);
   }
 }
 
 async function pollAnswer(my) {
   try {
+    if (my !== askGen) return;
+    if (!repoReady) return setTimeout(() => pollAnswer(my), 400);   // after a refresh, wait for the repo check
     const d = await api(`/ask/${sessionId}`);
     if (my !== askGen) return;
     await ensureTree();
-    outputCard.hidden = false;
+
+    if (!cur) {                                   // restored after a page refresh
+      welcome.hidden = true;
+      addUser(d.question);
+      cur = addAgent();
+    }
+    const running = d.status === "running";
+    if (running) { asking = true; refresh(); }
+
     d.findings.slice(shown).forEach(addStep);
     shown = d.findings.length;
-    stepCount.textContent = shown || "";
 
-    const running = d.status === "running";
     Graph.setActive(running);
     pill.hidden = !running;
     pill.textContent = `Exploring · ${shown} step${shown === 1 ? "" : "s"}`;
+    scrollDown();
+
     if (running) {
-      if (!timer) startTimer();
+      if (!t0) t0 = Date.now();
+      if (!timer) startTimer(); else tickMeta();
       return setTimeout(() => pollAnswer(my), 1200);
     }
     finish(d);
   } catch (e) {
     if (my !== askGen) return;
-    stopTimer(); asking = false; refresh(); pill.hidden = true; Graph.setActive(false);
     if (e.status === 404) { sessionId = null; localStorage.removeItem("sessionId"); }
-    setStatus(askStatus, e.status === 404 ? "That session is gone (the backend restarted). Please ask again." : e.message, "error");
+    if (!cur) { asking = false; refresh(); return; }
+    fail(e.status === 404 ? "That session is gone (the backend was restarted). Please ask again." : e.message);
   }
-}
-
-function finish(d) {
-  stopTimer(); asking = false; refresh();
-  if (d.status === "failed") return setStatus(askStatus, "The agent failed: " + d.error, "error");
-  setStatus(askStatus, "Done.", "ok");
-  const text = d.final_answer || "(The agent returned no answer.)";
-  if (window.marked && window.DOMPurify) answerBox.innerHTML = DOMPurify.sanitize(marked.parse(text));
-  else answerBox.textContent = text;
-  answerReady = true;
-  tabAnswer.disabled = false;
-  showTab("answer");                        // switch to the answer automatically
 }
 
 function addStep(f) {
   Graph.apply(f);
+  if (f.action === "read_file") addSource(f.target.replace(PARTIAL, ""));
   const li = document.createElement("li");
   li.innerHTML = "<details><summary><span class='badge'></span><code></code></summary><pre></pre></details>";
   const badge = li.querySelector(".badge");
@@ -368,31 +470,79 @@ function addStep(f) {
   badge.classList.add(f.action);
   li.querySelector("code").textContent = f.target;
   li.querySelector("pre").textContent = f.result_summary;
-  findingsList.appendChild(li);
-  if (!findingsList.hidden) tabBody.scrollTop = tabBody.scrollHeight;   // follow the newest step
+  cur.steps.appendChild(li);
+}
+
+function finish(d) {
+  stopTimer(); asking = false; refresh(); pill.hidden = true;
+  if (d.status === "failed") return fail("The agent failed: " + d.error);
+
+  const secs = t0 ? Math.round((Date.now() - t0) / 1000) + "s" : "";
+  t0 = 0;
+  cur.el.classList.add("done");
+  cur.title.textContent = `Explored ${shown} step${shown === 1 ? "" : "s"}`;
+  cur.meta.textContent = secs;
+  cur.trace.open = false;
+  if (!shown) cur.trace.hidden = true;
+
+  const text = d.final_answer || "(The agent returned no answer.)";
+  if (window.marked && window.DOMPurify) cur.answer.innerHTML = DOMPurify.sanitize(marked.parse(text));
+  else { cur.answer.textContent = text; cur.answer.style.whiteSpace = "pre-wrap"; }
+  cur.answer.hidden = false;
+  cur.actions.hidden = false;
+  cur.copy.onclick = async () => {
+    try { await navigator.clipboard.writeText(text); cur.copy.textContent = "Copied"; }
+    catch { cur.copy.textContent = "Copy failed"; }
+  };
+  scrollDown();
+  question.focus();
+}
+
+function fail(message) {
+  stopTimer(); asking = false; refresh(); pill.hidden = true; Graph.setActive(false);
+  if (!cur) return setHint(message, "error");
+  cur.el.classList.add("failed");
+  cur.title.textContent = "Something went wrong";
+  cur.meta.textContent = "";
+  cur.trace.open = false;
+  if (!cur.steps.children.length) cur.trace.hidden = true;
+  cur.answer.hidden = false;
+  cur.answer.classList.add("error");
+  cur.answer.textContent = message;
+  scrollDown();
 }
 
 // ---- wiring
 loadBtn.addEventListener("click", loadRepo);
-askBtn.addEventListener("click", askQuestion);
 repoUrlInput.addEventListener("keydown", (e) => { if (e.key === "Enter") loadRepo(); });
-questionInput.addEventListener("keydown", (e) => { if (e.key === "Enter") askQuestion(); });
-tabActivity.addEventListener("click", () => showTab("activity"));
-tabAnswer.addEventListener("click", () => showTab("answer"));
-expandBtn.addEventListener("click", () => {
-  expandBtn.textContent = outputCard.classList.toggle("full") ? "Close ✕" : "Expand ⤢";
+askBtn.addEventListener("click", () => askQuestion());
+question.addEventListener("input", autosize);
+question.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); askQuestion(); }
 });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeFull(); });
+welcome.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-q]");
+  if (b) askQuestion(b.dataset.q);
+});
+changeBtn.addEventListener("click", leaveChat);
+$("brand").addEventListener("click", (e) => { e.preventDefault(); if (!workspace.hidden) leaveChat(); });
+backBtn.addEventListener("click", enterChat);
+mapBtn.addEventListener("click", () => {
+  workspace.classList.toggle("map-on");
+  setTimeout(() => Graph.refit(), 250);
+});
+fitBtn.addEventListener("click", () => Graph.refit());
+let resizeTimer;
+window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => Graph.refit(), 200); });
 
+// ---- start
+workspace.classList.toggle("map-on", !matchMedia("(max-width: 900px)").matches);
 repoUrlInput.value = localStorage.getItem("repoUrl") || "";
+setHint("");
 refresh();
 if (repoId) {
   loadBtn.disabled = true;
-  setStatus(repoStatus, "Checking saved repository…");
+  setStatus("Checking saved repository…");
   pollRepo(++repoGen);
 }
-if (sessionId) {
-  asking = true; refresh();
-  setStatus(askStatus, "Checking saved question…");
-  pollAnswer(++askGen);
-}
+if (sessionId) pollAnswer(++askGen);
