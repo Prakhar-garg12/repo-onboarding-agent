@@ -1,9 +1,13 @@
 from pathlib import Path
 import git 
+from app.config import settings
 
 
-WORKSPACE_DIR = Path(__file__).resolve().parent.parent.parent / "workspace"
-
+WORKSPACE_DIR = (
+    Path(settings.workspace_dir)
+    if settings.workspace_dir
+    else Path(__file__).resolve().parent.parent.parent / "workspace"
+)
 
 
 def clone_repo(repo_id: str, repo_url: str) -> Path:
@@ -14,7 +18,7 @@ def clone_repo(repo_id: str, repo_url: str) -> Path:
     if local_path.exists():
         return local_path
 
-    git.Repo.clone_from(repo_url, local_path, depth=50)
+    git.Repo.clone_from(repo_url, local_path, depth=1, single_branch=True)
     return local_path
 
 
