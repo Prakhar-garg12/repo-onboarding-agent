@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     # App
     app_name: str = "Repo Onboarding Agent"
     environment: str = "dev"
+    workspace_dir: str = ""
 
     # CORS
     allowed_origins: list[str] = ["http://localhost:3000"]
@@ -16,9 +17,10 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://localhost:6333"
     qdrant_api_key: str = ""
 
-    # Grok
-    groq_api_key: str = ""
-    groq_model: str = "openai/gpt-oss-120b"
+    # Gemini
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-3.5-flash-lite"
+    gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
 
 settings = Settings()
