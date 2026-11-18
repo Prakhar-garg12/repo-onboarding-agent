@@ -12,7 +12,7 @@ VECTOR_SIZE = 384
 
 
 def get_client() -> QdrantClient:
-    return QdrantClient(url=settings.qdrant_url)
+    return QdrantClient(url=settings.qdrant_url, timeout=60)
 
 
 def ensure_collection() -> None:
