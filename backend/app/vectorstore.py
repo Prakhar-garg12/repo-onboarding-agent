@@ -20,12 +20,10 @@ def ensure_collection() -> None:
     existing = [c.name for c in client.get_collections().collections]
 
     if COLLECTION_NAME not in existing:
-        client.create_collection(
-           collection_name=COLLECTION_NAME,
-           vectors_config=qmodels.VectorParams(
-                size=VECTOR_SIZE,
-                distance = qmodels.Distance.COSINE,
-           ),
+        client.create_payload_index(
+            collection_name=COLLECTION_NAME,
+            field_name="repo_id",
+            field_schema=qmodels.PayloadSchemaType.KEYWORD,
         )
 
 def upsert_chunks(points: list[qmodels.PointStruct]) -> None:

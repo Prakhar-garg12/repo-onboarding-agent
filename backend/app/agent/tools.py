@@ -6,12 +6,16 @@ from app.vectorstore import search_chunks
 
 
 
-def list_dir(repo_id: str, sub_path: str = ".") -> list[str]:
-
+def list_dir(repo_id: str, sub_path: str = ".", max_items: int = 150) -> list[str]:
+    """Lists files and folders at sub_path, capped so huge folders don't flood the prompt."""
     target = WORKSPACE_DIR / repo_id / sub_path
     if not target.exists():
         return []
-    return sorted(p.name for p in target.iterdir())
+    names = sorted(p.name for p in target.iterdir())
+    if len(names) > max_items:
+        extra = len(names) - max_items
+        names = names[:max_items] + [f"... ({extra} more not shown)"]
+    return names
 
 
 def read_file(repo_id: str, file_path: str, start: int = 0, max_chars: int = 4000) -> str:

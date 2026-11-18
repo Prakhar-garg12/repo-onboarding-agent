@@ -1,4 +1,5 @@
 import os
+import time
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks
@@ -16,25 +17,30 @@ router = APIRouter(prefix="/repos", tags=["repos"])
 
 
 def process_repository_task(repo_id: str, repo_url: str):
-
+    stage = "starting"
     try:
-        update_repo_status(repo_id, "cloning")
+        stage = "cloning"
+        update_repo_status(repo_id, stage)
+        t = time.time()
         clone_repo(repo_id, repo_url)
+        print(f"[{repo_id[:8]}] clone: {time.time() - t:.0f}s")
 
-        update_repo_status(repo_id, "parsing")
-        repo_path = WORKSPACE_DIR / repo_id
-        chunks = parse_repo(repo_path)
+        stage = "parsing"
+        update_repo_status(repo_id, stage)
+        t = time.time()
+        chunks = parse_repo(WORKSPACE_DIR / repo_id)
         set_chunk_count(repo_id, len(chunks))
+        print(f"[{repo_id[:8]}] parse: {time.time() - t:.0f}s, {len(chunks)} chunks")
 
-
-        update_repo_status(repo_id, "indexing")
+        stage = "indexing"
+        update_repo_status(repo_id, stage)
+        t = time.time()
         index_chunks(repo_id, chunks)
-        
+        print(f"[{repo_id[:8]}] index: {time.time() - t:.0f}s")
+
         update_repo_status(repo_id, "ready")
-
     except Exception as e:
-
-        update_repo_status(repo_id,"failed", error=str(e))
+        update_repo_status(repo_id, "failed", error=f"during {stage}: {e}")
 
 
 @router.post("", response_model=CreateRepoResponse)
