@@ -1,12 +1,15 @@
+import os 
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List
 
+MAX_FILE_BYTES = 200_000 
 
 
 IGNORED_DIRS = {".git", "node_modules", "__pycache__",".venv", "venv"}
 
 SOURCE_EXTENSIONS = {".py", ".js", ".ts", ".java", ".go", ".rb", ".md"}
+
 
 
 @dataclass
@@ -25,10 +28,15 @@ def parse_repo(repo_path: Path) -> List[CodeChunk]:
         if not file_path.is_file():
             continue
 
-        if any(part in IGNORED_DIRS for part in file_path.parts):
+        relative = file_path.relative_to(repo_path)
+
+        if any(part in IGNORED_DIRS for part in relative.parts):
             continue
 
         if file_path.suffix not in SOURCE_EXTENSIONS:
+            continue
+
+        if file_path.stat().st_size > MAX_FILE_BYTES:
             continue
 
         content = file_path.read_text(errors="ignore")
